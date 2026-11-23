@@ -6,6 +6,7 @@ import {
   type Part,
 } from "firebase/ai";
 import {
+  applyVaultRedaction,
   buildEntityCounts,
   buildVaultAndScrub,
   rehydrateAuditReport,
@@ -1029,6 +1030,153 @@ export async function streamLocalRewrite(params: {
   };
 
   return { finalText, trace };
+}
+
+/**
+ * STAGE 3C: PRIVATE ZERO-LEAK HYBRID DOCUMENT Q&A
+ *
+ * Scrubs the user's follow-up question locally in RAM using the active Vault + Regex Guard,
+ * verifies 0 bytes of raw PII remain, executes either on-device (`PREFER_ON_DEVICE`, $0.00 / offline)
+ * or via cloud (`ONLY_IN_CLOUD` + App Check on anonymized tokens only), and re-hydrates the streamed
+ * response strictly inside local browser RAM.
+ */
+export async function askDocumentHybrid(params: {
+  ai: AI;
+  question: string;
+  scrubbedText: string;
+  domain: DocumentDomain;
+  profile: ComplianceProfileId;
+  policy: RemotePolicyConfig;
+  entities: VaultEntity[];
+  preferLocal: boolean;
+  onChunk?: (rehydratedPartial: string) => void;
+}): Promise<{
+  scrubbedQuestion: string;
+  anonymizedAnswer: string;
+  rehydratedAnswer: string;
+  trace: PipelineStageTrace;
+}> {
+  const {
+    ai,
+    question,
+    scrubbedText,
+    domain,
+    profile,
+    policy,
+    entities,
+    preferLocal,
+    onChunk,
+  } = params;
+
+  const startedAt = performance.now();
+
+  // Scrub the user's question against existing vault entities AND run regex guard on new secrets
+  const questionApplied = applyVaultRedaction(question.trim(), entities);
+  const extraRegexHits = runDeterministicRegexGuard(
+    questionApplied.scrubbedText,
+    profile,
+    policy.profiles[profile].categories,
+  );
+  let scrubbedQuestion = questionApplied.scrubbedText;
+  for (let i = 0; i < extraRegexHits.length; i++) {
+    const hit = extraRegexHits[i];
+    if (hit.original.length >= 3) {
+      scrubbedQuestion = scrubbedQuestion
+        .split(hit.original)
+        .join(`[${hit.category}_Q${i + 1}]`);
+    }
+  }
+
+  const docGuard = verifyZeroLeak(scrubbedText, entities);
+  const qGuard = verifyZeroLeak(scrubbedQuestion, entities);
+  if (!docGuard.verified || !qGuard.verified) {
+    throw new Error(
+      "HARD ZERO-LEAK BLOCK: Follow-up question or document context contained unredacted entities.",
+    );
+  }
+
+  const prompt = [
+    `You are a calm, practical ${domain} advisor answering a follow-up question about an anonymized document.`,
+    `Keep all placeholder tokens (like [PERSON_1], [COMPANY_1], [SALARY_1], [IBAN_1], [API_KEY_1]) verbatim so the user's browser can restore them locally.`,
+    `Answer clearly and concisely in 3-5 sentences (or crisp bullets) directly grounded in the document.`,
+    ``,
+    `--- ANONYMIZED DOCUMENT ---`,
+    scrubbedText.slice(0, preferLocal ? 3600 : 7500),
+    `--- END DOCUMENT ---`,
+    ``,
+    `QUESTION: ${scrubbedQuestion}`,
+  ].join("\n");
+
+  const finalGuard = verifyZeroLeak(prompt, entities);
+  if (!finalGuard.verified) {
+    throw new Error("HARD ZERO-LEAK BLOCK: Outbound Q&A prompt failed final scan.");
+  }
+
+  const model = preferLocal
+    ? getGenerativeModel(ai, {
+        mode: InferenceMode.PREFER_ON_DEVICE,
+        onDeviceParams: {
+          createOptions: {
+            expectedInputs: [{ type: "text", languages: ["en"] }],
+            expectedOutputs: [{ type: "text", languages: ["en"] }],
+          },
+        },
+        inCloudParams: {
+          model: policy.cloudFastFallbackModel,
+        },
+      })
+    : getGenerativeModel(ai, {
+        mode: InferenceMode.ONLY_IN_CLOUD,
+        inCloudParams: {
+          model: policy.cloudAuditModel,
+        },
+      });
+
+  const streamResult = await model.generateContentStream(prompt);
+  let accumulated = "";
+
+  for await (const chunk of streamResult.stream) {
+    accumulated += chunk.text();
+    if (onChunk) {
+      onChunk(rehydrateText(accumulated, entities));
+    }
+  }
+
+  const finalResponse = await streamResult.response;
+  const inferenceSource = mapSdkInferenceSource(
+    finalResponse.inferenceSource,
+    preferLocal ? "ON_DEVICE" : "IN_CLOUD",
+  );
+  const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
+  const anonymizedAnswer = (accumulated || finalResponse.text()).trim();
+  const rehydratedAnswer = rehydrateText(anonymizedAnswer, entities);
+
+  const bytesSent =
+    inferenceSource === "IN_CLOUD" ? new TextEncoder().encode(prompt).length : 0;
+
+  const trace: PipelineStageTrace = {
+    stage: "DOCUMENT_QA",
+    modeRequested: preferLocal
+      ? "InferenceMode.PREFER_ON_DEVICE (Private Q&A)"
+      : "InferenceMode.ONLY_IN_CLOUD (Deep Q&A)",
+    inferenceSource,
+    modelUsed:
+      inferenceSource === "ON_DEVICE"
+        ? "Gemini Nano 4 Q&A (Local)"
+        : `${preferLocal ? policy.cloudFastFallbackModel : policy.cloudAuditModel} Q&A (App Check)`,
+    latencyMs,
+    bytesSentToCloud: bytesSent,
+    piiLeakedBytes: 0,
+    timestamp: Date.now(),
+    note: `Question & document scrubbed locally (0B PII leaked across ${bytesSent.toLocaleString()}B).`,
+  };
+
+  return {
+    scrubbedQuestion,
+    anonymizedAnswer,
+    rehydratedAnswer,
+    trace,
+  };
 }
 
 /**

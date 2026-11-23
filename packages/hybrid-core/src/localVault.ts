@@ -461,3 +461,62 @@ export function buildEntityCounts(entities: VaultEntity[]): Record<string, numbe
   }
   return counts;
 }
+
+/**
+ * Adds a user-specified confidential word or phrase (e.g. a project codename)
+ * to the local RAM vault and immediately re-applies zero-leak redaction.
+ * Uses an allowlisted EntityCategory so Firestore zero-leak schema rules stay valid.
+ */
+export function addCustomVaultTerm(
+  text: string,
+  currentEntities: VaultEntity[],
+  rawTerm: string,
+  category: EntityCategory = "COMPANY",
+): {
+  added: boolean;
+  entities: VaultEntity[];
+  scrubbedText: string;
+  bytesShielded: number;
+  zeroLeakVerified: boolean;
+  leakedMatches: string[];
+} {
+  const clean = rawTerm.trim();
+  if (clean.length < 3 || /^\[[A-Z_]+_\d+\]$/.test(clean)) {
+    const unchanged = applyVaultRedaction(text, currentEntities);
+    return { added: false, entities: currentEntities, ...unchanged };
+  }
+
+  const alreadyExists = currentEntities.some(
+    (e) => e.original.toLowerCase() === clean.toLowerCase(),
+  );
+  if (alreadyExists) {
+    const nextEntities = currentEntities.map((e) =>
+      e.original.toLowerCase() === clean.toLowerCase() ? { ...e, enabled: true } : e,
+    );
+    const applied = applyVaultRedaction(text, nextEntities);
+    return { added: true, entities: nextEntities, ...applied };
+  }
+
+  let maxIdx = 0;
+  const prefix = `[${category}_`;
+  for (const e of currentEntities) {
+    if (e.token.startsWith(prefix)) {
+      const n = Number.parseInt(e.token.slice(prefix.length, -1), 10);
+      if (Number.isFinite(n) && n > maxIdx) maxIdx = n;
+    }
+  }
+
+  const newEntity: VaultEntity = {
+    token: `[${category}_${maxIdx + 1}]`,
+    category,
+    original: clean,
+    source: "regex-guard",
+    enabled: true,
+    confidence: 1.0,
+    occurrences: countOccurrences(text, clean),
+  };
+
+  const nextEntities = [...currentEntities, newEntity];
+  const applied = applyVaultRedaction(text, nextEntities);
+  return { added: true, entities: nextEntities, ...applied };
+}

@@ -53,10 +53,10 @@ flowchart LR
 
 ### 1. 📄 Calm, Executive-Grade Document Studio (`apps/web`)
 Designed for real practitioners — not a noisy developer dashboard:
-* **Spacious Centered Document View**: Proportional reading typography for contracts, medical reports, and payslips (monospace reserved for source code), with subtle interactive highlights on locally protected entities (click any highlight to toggle protection).
-* **Drag-and-Drop Local Ingestion**: Drop any **PNG/JPEG photo** (scanned lab report or contract) or **`.txt`/`.md`/source code file** directly onto the document sheet — analyzed strictly in browser RAM.
-* **Instant `Document` | `Anonymized view` | `Edit` Switcher**: Inspect the exact anonymized skeleton before running a review, or copy the scrubbed text in one click.
-* **Editorial Review Panel**: Executive Risk Score (`0–100`), severity-tagged clauses, compliance checks, 1-click **`With your details | Anonymized`** proof toggle, on-device streaming **`Refine`** & **`Draft response message`**, and 1-click **Markdown (`.md`) Memo Export**.
+* **Spacious Centered Document View**: Proportional reading typography for contracts, medical reports, and payslips (monospace reserved for source code), inline document renaming, and subtle interactive highlights on locally protected entities (click any highlight to toggle protection, or add custom confidential codenames inside `Manage`).
+* **100% Client-Side PDF, Image & File Ingestion**: Click **`Upload`** or drag-and-drop any **`.pdf` contract/lab report** (parsed locally via lazy-loaded PDF.js in browser RAM — 0 bytes uploaded), **PNG/JPEG photo**, or **`.txt`/`.md`/source code file**.
+* **Interactive Clause Navigation & Revision Tracking**: Click any clause reference (`Section 3 ↗`) in the Review panel to scroll directly to and illuminate that section inside the document; track accepted revisions (`Accept` → `2 of 4 accepted`), stream on-device tone refinements & counter-proposals, and export clean **Markdown (`.md`) Review Memos**.
+* **Private Hybrid Follow-Up Q&A (`Ask about this document`)**: Ask custom questions about any document in **`On-device`** (`PREFER_ON_DEVICE`, `$0.00`, works offline) or **`Cloud`** (`ONLY_IN_CLOUD` + App Check) mode — even your questions are automatically scrubbed of PII locally before execution and re-hydrated in RAM.
 
 ### 2. 🔍 1-Click **Privacy & Hybrid AI Inspector** (Compliance & Judge Verification)
 Click **`0 bytes leaked · Inspect`** in the top-right header to open the dedicated verification drawer:
@@ -126,7 +126,9 @@ VeilAI-BuildHybridAI/
 │   │       │   ├── InspectorPanel.tsx        # Editorial review dossier, re-hydration toggle, local drafting & export
 │   │       │   ├── PrivacyInspectorDrawer.tsx # 1-click compliance & judge inspector (SDK traces, leak test, benchmark, RC)
 │   │       │   └── AuditHistoryDrawer.tsx    # Real-time Firestore cross-surface sync ledger
-│   │       └── utils/sampleLabImage.ts       # Programmatic clinical lab report PNG generator
+│   │       └── utils/
+│   │           ├── localPdfParser.ts         # Lazy-loaded 100% client-side PDF.js text extractor (0 uploads)
+│   │           └── sampleLabImage.ts         # Programmatic clinical lab report PNG generator
 │   └── extension/                  # Chrome Manifest V3 Side-Panel Extension (@veilai/extension)
 │       ├── public/manifest.json    # MV3 Side Panel + activeTab + Gmail/GitHub/Docs content script
 │       └── src/

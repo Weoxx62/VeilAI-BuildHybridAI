@@ -108,7 +108,8 @@ export interface PipelineStageTrace {
     | "STAGE_2_CLOUD_AUDIT"
     | "STAGE_3_LOCAL_REHYDRATE"
     | "LOCAL_TRIAGE"
-    | "LOCAL_REWRITE";
+    | "LOCAL_REWRITE"
+    | "DOCUMENT_QA";
   modeRequested: string;
   inferenceSource: InferenceSourceTag;
   modelUsed: string;
@@ -117,6 +118,18 @@ export interface PipelineStageTrace {
   piiLeakedBytes: number;
   timestamp: number;
   note?: string;
+}
+
+export interface DocumentQaMessage {
+  id: string;
+  question: string;
+  scrubbedQuestion: string;
+  rehydratedAnswer: string;
+  anonymizedAnswer: string;
+  inferenceSource: InferenceSourceTag;
+  modelUsed: string;
+  latencyMs: number;
+  createdAt: number;
 }
 
 export interface RedactionResult {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  addCustomVaultTerm,
   applyVaultRedaction,
   buildVaultAndScrub,
   rehydrateAuditReport,
+  rehydrateText,
   runDeterministicRegexGuard,
   verifyZeroLeak,
 } from "./localVault.js";
@@ -144,5 +146,34 @@ describe("VeilAI Local Privacy Vault — Zero-Leak Invariants", () => {
     expect(cert.wirePayloadSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(serialized).not.toContain("Elena Rostova");
     expect(serialized).not.toContain(SYNTHETIC_STRIPE_KEY);
+  });
+
+  it("shields user-added custom confidential terms and re-hydrates follow-up answers cleanly", () => {
+    const text = "Confidential acquisition memo for Project Helios led by Claire Beaumont.";
+    const base = buildVaultAndScrub(
+      text,
+      [{ category: "PERSON", original: "Claire Beaumont", source: "gemini-nano", confidence: 0.96 }],
+      runDeterministicRegexGuard(text, "GDPR_EU"),
+    );
+
+    const updated = addCustomVaultTerm(text, base.entities, "Project Helios", "COMPANY");
+    expect(updated.added).toBe(true);
+    expect(updated.zeroLeakVerified).toBe(true);
+    expect(updated.scrubbedText).not.toContain("Project Helios");
+    expect(updated.scrubbedText).toContain("[COMPANY_1]");
+
+    // Verify follow-up Q&A question scrubbing & local re-hydration
+    const scrubbedQ = applyVaultRedaction(
+      "What are the risks for Project Helios and Claire Beaumont?",
+      updated.entities,
+    );
+    expect(scrubbedQ.zeroLeakVerified).toBe(true);
+    expect(scrubbedQ.scrubbedText).toBe("What are the risks for [COMPANY_1] and [PERSON_1]?");
+
+    const answer = rehydrateText(
+      "[COMPANY_1] requires IP carve-out approval from [PERSON_1].",
+      updated.entities,
+    );
+    expect(answer).toBe("Project Helios requires IP carve-out approval from Claire Beaumont.");
   });
 });

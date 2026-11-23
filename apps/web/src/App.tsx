@@ -3,7 +3,9 @@ import type { User } from "firebase/auth";
 import { AlertCircle } from "lucide-react";
 import {
   accumulateTelemetry,
+  addCustomVaultTerm,
   applyVaultRedaction,
+  askDocumentHybrid,
   buildVaultAndScrub,
   buildZeroLeakCertificate,
   checkChromeAICapability,
@@ -35,6 +37,8 @@ import {
   type ComplianceProfileId,
   type DemoScenario,
   type DocumentDomain,
+  type DocumentQaMessage,
+  type EntityCategory,
   type LocalTriageResult,
   type LocalVsHybridBenchmark,
   type PipelineStageTrace,
@@ -49,6 +53,41 @@ import { InspectorPanel } from "./components/InspectorPanel";
 import { AuditHistoryDrawer } from "./components/AuditHistoryDrawer";
 import { PrivacyInspectorDrawer } from "./components/PrivacyInspectorDrawer";
 import { generateSampleMedicalLabPng } from "./utils/sampleLabImage";
+import { extractTextFromPdfLocally } from "./utils/localPdfParser";
+
+function inferDomainAndProfile(
+  fileName: string,
+  text: string,
+  fallbackProfile: ComplianceProfileId,
+): { domain: DocumentDomain; profile: ComplianceProfileId } {
+  const sample = `${fileName}\n${text.slice(0, 1500)}`.toLowerCase();
+  if (/\.(ts|tsx|js|jsx|py|go|rs|java|yml|yaml|json|env)$/i.test(fileName)) {
+    return { domain: "code", profile: "DEVSECOPS_CODE" };
+  }
+  if (/(patient|hemoglobin|hba1c|cholesterol|lab report|physician|mrn-|hipaa|blood panel)/i.test(sample)) {
+    return { domain: "medical", profile: "HIPAA_MEDICAL" };
+  }
+  if (/(payslip|salary|withholding|tax id|w-2|1099|rsu|invoice|fiscal|compensation)/i.test(sample)) {
+    return { domain: "financial", profile: "FINANCIAL_TAX" };
+  }
+  if (/(agreement|confidential|non-compete|employment|nda|intellectual property|jurisdiction|clause)/i.test(sample)) {
+    return { domain: "legal", profile: "GDPR_EU" };
+  }
+  return { domain: "general", profile: fallbackProfile };
+}
+
+function defaultCustomCategoryForDomain(domain: DocumentDomain): EntityCategory {
+  switch (domain) {
+    case "code":
+      return "PASSWORD";
+    case "medical":
+      return "MEDICAL_ID";
+    case "financial":
+      return "ACCOUNT_NUMBER";
+    default:
+      return "COMPANY";
+  }
+}
 
 function buildInstantLocalPreview(
   text: string,
@@ -162,6 +201,11 @@ export function App() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [isSampleLabImage, setIsSampleLabImage] = useState(false);
+  const [isParsingPdf, setIsParsingPdf] = useState(false);
+  const [pdfMeta, setPdfMeta] = useState<{ pageCount: number; truncated: boolean } | null>(
+    null,
+  );
+  const [highlightedClauseRef, setHighlightedClauseRef] = useState<string | null>(null);
 
   // Pipeline State
   const [redaction, setRedaction] = useState<RedactionResult | null>(() =>
@@ -178,6 +222,9 @@ export function App() {
   const [localTriage, setLocalTriage] = useState<LocalTriageResult | null>(null);
   const [benchmark, setBenchmark] = useState<LocalVsHybridBenchmark | null>(null);
   const [traces, setTraces] = useState<PipelineStageTrace[]>([]);
+  const [qaMessages, setQaMessages] = useState<DocumentQaMessage[]>([]);
+  const [qaStreamingAnswer, setQaStreamingAnswer] = useState("");
+  const [isAskingQa, setIsAskingQa] = useState(false);
   const [offlineQueued, setOfflineQueued] = useState(false);
   const [telemetry, setTelemetry] = useState(() => createInitialTelemetry());
   const [leakTestResult, setLeakTestResult] = useState<{
@@ -260,6 +307,21 @@ export function App() {
     setImagePreviewUrl(nextUrl);
   };
 
+  const resetAnalysisState = () => {
+    setWirePayload("");
+    setCloudReportAnonymized(null);
+    setRehydratedReport(null);
+    setLocalTriage(null);
+    setBenchmark(null);
+    setTraces([]);
+    setQaMessages([]);
+    setQaStreamingAnswer("");
+    setHighlightedClauseRef(null);
+    setOfflineQueued(false);
+    setLeakTestResult(null);
+    setErrorBanner(null);
+  };
+
   const handleWarmupNano = async () => {
     setErrorBanner(null);
     setIsWarmingUp(true);
@@ -302,24 +364,17 @@ export function App() {
     setIsRunningCloud(false);
     setIsRunningTriage(false);
     setIsRunningBenchmark(false);
-    setErrorBanner(null);
-    setLeakTestResult(null);
+    resetAnalysisState();
 
     setActiveScenarioId(scenario.id);
     setDocTitle(scenario.title);
     setDocDomain(scenario.domain);
     setActiveProfile(scenario.recommendedProfile);
+    setPdfMeta(null);
     setRawText(scenario.content);
     setRedaction(
       buildInstantLocalPreview(scenario.content, scenario.recommendedProfile, policy),
     );
-    setWirePayload("");
-    setCloudReportAnonymized(null);
-    setRehydratedReport(null);
-    setLocalTriage(null);
-    setBenchmark(null);
-    setTraces([]);
-    setOfflineQueued(false);
 
     if (scenario.modality === "image") {
       setInputModality("image");
@@ -345,23 +400,20 @@ export function App() {
     runIdRef.current += 1;
     setIsRunningShield(false);
     setIsRunningCloud(false);
+    resetAnalysisState();
     setActiveScenarioId(null);
     setDocTitle("Untitled Document");
     setDocDomain("general");
     setInputModality("text");
+    setPdfMeta(null);
     setRawText("");
     setRedaction(null);
-    setWirePayload("");
-    setCloudReportAnonymized(null);
-    setRehydratedReport(null);
-    setLocalTriage(null);
-    setBenchmark(null);
-    setTraces([]);
   };
 
   const handleChangeRawText = (text: string) => {
     setRawText(text);
     setActiveScenarioId(null);
+    setHighlightedClauseRef(null);
     setRedaction(
       text.trim().length > 0
         ? buildInstantLocalPreview(text, activeProfile, policy)
@@ -375,49 +427,80 @@ export function App() {
     setIsSampleLabImage(true);
     setManagedPreviewUrl(sample.previewUrl);
     setInputModality("image");
+    setPdfMeta(null);
     setDocTitle("Clinical Blood Panel & Metabolic Lab Report");
     setDocDomain("medical");
     setActiveProfile("HIPAA_MEDICAL");
   };
 
   const handleSelectImageFile = (file: File) => {
+    resetAnalysisState();
     setImageFile(file);
     setIsSampleLabImage(false);
     setManagedPreviewUrl(URL.createObjectURL(file));
     setInputModality("image");
+    setPdfMeta(null);
+    setActiveScenarioId(null);
     setDocTitle(file.name);
-    setCloudReportAnonymized(null);
-    setRehydratedReport(null);
+  };
+
+  const handleUploadPdfFile = async (file: File) => {
+    runIdRef.current += 1;
+    setIsRunningShield(false);
+    setIsRunningCloud(false);
+    resetAnalysisState();
+    setIsParsingPdf(true);
+    try {
+      const parsed = await extractTextFromPdfLocally(file);
+      const { domain, profile } = inferDomainAndProfile(
+        file.name,
+        parsed.text,
+        activeProfile,
+      );
+      setActiveScenarioId(null);
+      setInputModality("text");
+      setImageFile(null);
+      setIsSampleLabImage(false);
+      setManagedPreviewUrl(null);
+      setDocTitle(file.name.replace(/\.pdf$/i, ""));
+      setDocDomain(domain);
+      setActiveProfile(profile);
+      setPdfMeta({ pageCount: parsed.pageCount, truncated: parsed.truncated });
+      setRawText(parsed.text);
+      setRedaction(buildInstantLocalPreview(parsed.text, profile, policy));
+    } catch (err) {
+      setErrorBanner(
+        err instanceof Error
+          ? err.message
+          : "Could not read this PDF locally in the browser.",
+      );
+    } finally {
+      setIsParsingPdf(false);
+    }
   };
 
   const handleDropTextFile = (fileName: string, content: string) => {
     runIdRef.current += 1;
     setIsRunningShield(false);
     setIsRunningCloud(false);
+    resetAnalysisState();
     setActiveScenarioId(null);
     setInputModality("text");
     setImageFile(null);
     setIsSampleLabImage(false);
     setManagedPreviewUrl(null);
+    setPdfMeta(null);
     setDocTitle(fileName);
 
-    const isCode = /\.(ts|tsx|js|jsx|py|go|rs|java|yml|yaml|json|env)$/i.test(fileName);
-    const nextDomain: DocumentDomain = isCode ? "code" : "general";
-    const nextProfile: ComplianceProfileId = isCode ? "DEVSECOPS_CODE" : activeProfile;
-    setDocDomain(nextDomain);
-    setActiveProfile(nextProfile);
+    const { domain, profile } = inferDomainAndProfile(fileName, content, activeProfile);
+    setDocDomain(domain);
+    setActiveProfile(profile);
     setRawText(content);
     setRedaction(
       content.trim()
-        ? buildInstantLocalPreview(content, nextProfile, policy)
+        ? buildInstantLocalPreview(content, profile, policy)
         : null,
     );
-    setWirePayload("");
-    setCloudReportAnonymized(null);
-    setRehydratedReport(null);
-    setLocalTriage(null);
-    setBenchmark(null);
-    setTraces([]);
   };
 
   const persistIfSignedIn = useCallback(
@@ -577,7 +660,7 @@ export function App() {
     }
   };
 
-  const handleRunFullSplitBrain = async () => {
+  const handleRunFullSplitBrain = useCallback(async () => {
     const currentRunId = ++runIdRef.current;
     setCloudReportAnonymized(null);
     setRehydratedReport(null);
@@ -610,7 +693,25 @@ export function App() {
     }
 
     await executeStage2(shieldResult, currentRunId);
-  };
+  }, [docDomain, effectiveOnline, policy, services.ai, rawText, imageFile, inputModality, activeProfile, redaction, docTitle, localTriage, persistIfSignedIn]);
+
+  // Keyboard shortcut: Ctrl/Cmd + Enter runs Review document
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        const activeId = (document.activeElement as HTMLElement | null)?.id;
+        if (activeId === "veilai-qa-input" || activeId === "veilai-custom-shield-term") {
+          return;
+        }
+        if (!isRunningShield && !isRunningCloud) {
+          e.preventDefault();
+          void handleRunFullSplitBrain();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleRunFullSplitBrain, isRunningCloud, isRunningShield]);
 
   const handleRunShieldOnly = async () => {
     const currentRunId = ++runIdRef.current;
@@ -648,6 +749,61 @@ export function App() {
     } finally {
       if (runIdRef.current === currentRunId) setIsRunningTriage(false);
     }
+  };
+
+  const handleAskQuestion = async (question: string, preferLocal: boolean) => {
+    if (!redaction || isAskingQa) return;
+    if (!preferLocal && !services.isConfigured) {
+      setErrorBanner("Connect Firebase in apps/web/.env.local to ask via anonymized cloud.");
+      return;
+    }
+    setErrorBanner(null);
+    setIsAskingQa(true);
+    setQaStreamingAnswer("");
+    try {
+      const res = await askDocumentHybrid({
+        ai: services.ai,
+        question,
+        scrubbedText: redaction.scrubbedText,
+        domain: docDomain,
+        profile: activeProfile,
+        policy,
+        entities: redaction.entities,
+        preferLocal,
+        onChunk: (partial) => setQaStreamingAnswer(partial),
+      });
+
+      setQaMessages((prev) => [
+        ...prev,
+        {
+          id: `qa-${Date.now()}`,
+          question,
+          scrubbedQuestion: res.scrubbedQuestion,
+          rehydratedAnswer: res.rehydratedAnswer,
+          anonymizedAnswer: res.anonymizedAnswer,
+          inferenceSource: res.trace.inferenceSource,
+          modelUsed: res.trace.modelUsed,
+          latencyMs: res.trace.latencyMs,
+          createdAt: Date.now(),
+        },
+      ]);
+      setTraces((prev) => [...prev, res.trace]);
+      setTelemetry((prev) => accumulateTelemetry(prev, [res.trace], 0, 0, false));
+    } catch (err) {
+      setErrorBanner(
+        err instanceof Error ? `Q&A failed: ${err.message}` : "Could not answer question.",
+      );
+    } finally {
+      setIsAskingQa(false);
+      setQaStreamingAnswer("");
+    }
+  };
+
+  const handleFocusClause = (clauseRef: string) => {
+    if (inputModality === "image" && rawText.trim().length > 0) {
+      setInputModality("text");
+    }
+    setHighlightedClauseRef(clauseRef);
   };
 
   const handleTestLeakGuard = () => {
@@ -733,6 +889,25 @@ export function App() {
       bytesShielded: reapplied.bytesShielded,
       zeroLeakVerified: reapplied.zeroLeakVerified,
       leakedMatches: reapplied.leakedMatches,
+    });
+  };
+
+  const handleAddCustomTerm = (term: string) => {
+    if (!redaction) return;
+    const updated = addCustomVaultTerm(
+      redaction.extractedText,
+      redaction.entities,
+      term,
+      defaultCustomCategoryForDomain(docDomain),
+    );
+    if (!updated.added) return;
+    setRedaction({
+      ...redaction,
+      entities: updated.entities,
+      scrubbedText: updated.scrubbedText,
+      bytesShielded: updated.bytesShielded,
+      zeroLeakVerified: updated.zeroLeakVerified,
+      leakedMatches: updated.leakedMatches,
     });
   };
 
@@ -870,6 +1045,7 @@ export function App() {
 
           <DocumentWorkbench
             docTitle={docTitle}
+            onChangeDocTitle={setDocTitle}
             docDomain={docDomain}
             policy={policy}
             activeProfile={activeProfile}
@@ -881,22 +1057,32 @@ export function App() {
             imagePreviewUrl={imagePreviewUrl}
             imageFileName={imageFile?.name ?? null}
             isSampleLabImage={isSampleLabImage}
+            isParsingPdf={isParsingPdf}
+            pdfMeta={pdfMeta}
             onSelectImageFile={handleSelectImageFile}
+            onUploadPdfFile={handleUploadPdfFile}
             onDropTextFile={handleDropTextFile}
             onGenerateSampleLabImage={handleGenerateSampleLabImage}
             redaction={redaction}
             onToggleEntity={handleToggleEntity}
+            highlightedClauseRef={highlightedClauseRef}
+            onClearHighlightedClause={() => setHighlightedClauseRef(null)}
             onOpenPrivacyInspector={() => setPrivacyDrawerOpen(true)}
           />
         </div>
 
         <InspectorPanel
           docTitle={docTitle}
+          docDomain={docDomain}
           redaction={redaction}
           onToggleEntity={handleToggleEntity}
+          onAddCustomTerm={handleAddCustomTerm}
           cloudReportAnonymized={cloudReportAnonymized}
           rehydratedReport={rehydratedReport}
           localTriage={localTriage}
+          qaMessages={qaMessages}
+          qaStreamingAnswer={qaStreamingAnswer}
+          isAskingQa={isAskingQa}
           isRunningShield={isRunningShield}
           shieldElapsedSec={shieldElapsedSec}
           isRunningCloud={isRunningCloud}
@@ -910,6 +1096,8 @@ export function App() {
               void executeStage2(redaction, ++runIdRef.current);
             }
           }}
+          onFocusClause={handleFocusClause}
+          onAskQuestion={handleAskQuestion}
           onPolishRedlineLocally={handlePolishRedlineLocally}
           onDraftFullReplyLocally={handleDraftFullReplyLocally}
         />
