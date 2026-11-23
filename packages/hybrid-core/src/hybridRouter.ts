@@ -85,6 +85,8 @@ function buildCloudModelCascade(primary: string, fastFallback: string): string[]
     "gemini-3.8-flash",
     fastFallback,
     "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-4-hydrogen",
   ];
   const unique: string[] = [];
@@ -153,6 +155,8 @@ async function streamModelWithTimeout(params: {
   return withTimeout(
     async (signal) => {
       const streamResult = await runStream(signal);
+      // Attach no-op rejection handler so abrupt SSE errors never leak as unhandled rejections
+      void streamResult.response.catch(() => undefined);
       let accumulated = "";
       for await (const chunk of streamResult.stream) {
         if (signal.aborted) break;
@@ -849,6 +853,65 @@ export async function runStage2CloudAudit(params: {
   }
 
   if (!parsed) {
+    // Ultimate Hybrid AI Resilience: if ALL cloud models are experiencing a 500/503 outage,
+    // seamlessly fail over to on-device Gemini Nano 4 so the user is never stranded!
+    const lm = getGlobalLanguageModel();
+    let nanoAvail = "unavailable";
+    if (lm) {
+      try {
+        nanoAvail = await lm.availability({
+          expectedInputs: [{ type: "text", languages: ["en"] }],
+          expectedOutputs: [{ type: "text", languages: ["en"] }],
+        });
+      } catch {
+        nanoAvail = "unavailable";
+      }
+    }
+
+    if (nanoAvail === "available") {
+      try {
+        const localAuditModel = getGenerativeModel(ai, {
+          mode: InferenceMode.ONLY_ON_DEVICE,
+          onDeviceParams: {
+            createOptions: {
+              expectedInputs: [{ type: "text", languages: ["en"] }],
+              expectedOutputs: [{ type: "text", languages: ["en"] }],
+            },
+          },
+        });
+
+        const compactLocalPrompt = [
+          `Act as a senior ${domain} reviewer. Review this anonymized document and keep all [TOKEN_N] placeholders verbatim.`,
+          `Reply ONLY with valid JSON matching this exact shape:`,
+          `{"riskScore":85,"riskLevel":"HIGH","executiveSummary":"2 sentence summary","findings":[{"id":"F-01","severity":"CRITICAL","title":"Short title","clauseRef":"Section X","explanation":"Concise issue explanation","suggestedRedline":"Concrete replacement text"}],"complianceChecks":[{"rule":"Policy rule","status":"FAIL","note":"Short note"}],"actionChecklist":["Action 1"]}`,
+          `Include 3 distinct findings and 2 complianceChecks.`,
+          ``,
+          scrubbedText.slice(0, 2400),
+        ].join("\n");
+
+        const localRes = await withTimeout(
+          (signal) => localAuditModel.generateContent(compactLocalPrompt, { signal }),
+          24_000,
+          "Gemini Nano 4 Cloud-Outage Failover Audit",
+        );
+        const localParsed = safeJsonParse<AuditReport>(localRes.response.text());
+        if (localParsed && Array.isArray(localParsed.findings) && localParsed.findings.length > 0) {
+          parsed = localParsed;
+          chosenModel = "Gemini Nano 4 (Cloud 500 Hybrid Failover)";
+          inferenceSource = mapSdkInferenceSource(
+            localRes.response.inferenceSource,
+            "ON_DEVICE",
+          );
+          failoverNote =
+            " Cloud tier temporarily congested (HTTP 500); seamlessly completed review on-device via Gemini Nano 4.";
+        }
+      } catch {
+        // Fall through to rethrow cloud error below
+      }
+    }
+  }
+
+  if (!parsed) {
     throw lastError instanceof Error
       ? lastError
       : new Error("All cloud Gemini models are temporarily unavailable.");
@@ -913,7 +976,9 @@ export async function runStage2CloudAudit(params: {
     modelUsed:
       inferenceSource === "IN_CLOUD"
         ? `${chosenModel} (Firebase AI Logic + App Check)`
-        : "Gemini Nano 4 (PREFER_IN_CLOUD Offline Fallback)",
+        : chosenModel.includes("Nano")
+          ? chosenModel
+          : "Gemini Nano 4 (PREFER_IN_CLOUD Offline Fallback)",
     latencyMs: cloudLatencyMs,
     bytesSentToCloud: bytesSent,
     piiLeakedBytes: 0,
@@ -1307,6 +1372,47 @@ export async function askDocumentHybrid(params: {
         break;
       } catch (err) {
         lastErr = err;
+      }
+    }
+    if (!succeeded && !preferLocal) {
+      // Hybrid Cloud-Outage Failover: if every cloud model is 500/overloaded, answer locally via Nano 4
+      const lm = getGlobalLanguageModel();
+      let nanoAvail = "unavailable";
+      if (lm) {
+        try {
+          nanoAvail = await lm.availability({
+            expectedInputs: [{ type: "text", languages: ["en"] }],
+            expectedOutputs: [{ type: "text", languages: ["en"] }],
+          });
+        } catch {
+          nanoAvail = "unavailable";
+        }
+      }
+      if (nanoAvail === "available") {
+        try {
+          const fallbackLocal = getGenerativeModel(ai, {
+            mode: InferenceMode.ONLY_ON_DEVICE,
+            onDeviceParams: {
+              createOptions: {
+                expectedInputs: [{ type: "text", languages: ["en"] }],
+                expectedOutputs: [{ type: "text", languages: ["en"] }],
+              },
+            },
+          });
+          const res = await streamModelWithTimeout({
+            runStream: (signal) => fallbackLocal.generateContentStream(localPrompt, { signal }),
+            timeoutMs: 16_000,
+            label: "Gemini Nano 4 Cloud-Outage Q&A Failover",
+            onRawAccumulated: (acc) => onChunk?.(rehydrateText(acc, entities)),
+          });
+          anonymizedAnswer = res.text;
+          inferenceSource = mapSdkInferenceSource(res.inferenceSource, "ON_DEVICE");
+          modelUsed = "Gemini Nano 4 Q&A (Cloud 500 Failover)";
+          noteSuffix = " Cloud temporarily congested; answered locally via Gemini Nano 4.";
+          succeeded = true;
+        } catch {
+          // Rethrow cloud error below
+        }
       }
     }
     if (!succeeded) {
