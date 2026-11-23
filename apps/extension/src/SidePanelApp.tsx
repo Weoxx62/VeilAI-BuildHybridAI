@@ -501,17 +501,42 @@ export function SidePanelApp() {
       <header className="flex h-13 items-center justify-between border-b border-white/[0.06] bg-[#161618] px-4">
         <div className="flex items-center gap-2">
           <svg
-            width="18"
-            height="18"
+            width="21"
+            height="21"
             viewBox="0 0 64 64"
+            fill="none"
             aria-hidden="true"
             className="shrink-0"
           >
-            <rect width="64" height="64" rx="14" fill="#26262A" />
-            <path d="M32 10L14 17v13c0 12.2 7.7 22.8 18 26V10z" fill="#EAE9E5" />
-            <path d="M32 10l18 7v13c0 12.2-7.7 22.8-18 26V10z" fill="#6EE7B7" />
+            <defs>
+              <linearGradient id="ext-bg" x1="18" y1="2" x2="46" y2="62" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#26262B" />
+                <stop offset="100%" stopColor="#141417" />
+              </linearGradient>
+              <linearGradient id="ext-cloud" x1="48" y1="16" x2="30" y2="49" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#6EE7B7" />
+                <stop offset="100%" stopColor="#10B981" />
+              </linearGradient>
+              <linearGradient id="ext-local" x1="16" y1="16" x2="34" y2="49" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#F7F6F2" />
+                <stop offset="100%" stopColor="#DAD8D2" />
+              </linearGradient>
+              <linearGradient id="ext-shadow" x1="31" y1="31" x2="38" y2="34" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#0C0D10" stopOpacity="0.58" />
+                <stop offset="100%" stopColor="#0C0D10" stopOpacity="0" />
+              </linearGradient>
+              <clipPath id="ext-clip">
+                <polygon points="39.75,16.5 50.25,16.5 36.35,48.5 27.65,48.5" />
+              </clipPath>
+            </defs>
+            <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#ext-bg)" />
+            <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="14.25" stroke="#FFFFFF" strokeOpacity="0.14" strokeWidth="1.5" />
+            <polygon points="39.75,16.5 50.25,16.5 36.35,48.5 27.65,48.5" fill="url(#ext-cloud)" />
+            <polygon points="24.25,16.5 29.5,16.5 41.2,48.5 34.5,48.5" fill="url(#ext-shadow)" clipPath="url(#ext-clip)" />
+            <polygon points="13.75,16.5 24.25,16.5 36.35,48.5 27.65,48.5" fill="url(#ext-local)" />
+            <polygon points="27.65,48.5 32,37.8 36.35,48.5" fill="#FFFFFF" fillOpacity="0.12" />
           </svg>
-          <span className="text-[13.5px] font-semibold tracking-[-0.01em] text-[#F4F3EF]">
+          <span className="text-[14px] font-semibold tracking-[-0.02em] text-[#F4F3EF]">
             VeilAI
           </span>
           <span

@@ -83,8 +83,8 @@ export const DEFAULT_COMPLIANCE_PROFILES: Record<
 
 export const DEFAULT_REMOTE_POLICY: RemotePolicyConfig = {
   defaultComplianceProfile: "GDPR_EU",
-  // Verified no-billing flagship models from firebase.google.com/docs/ai-logic/models (Nov 2026)
-  cloudAuditModel: "gemini-4-hydrogen",
+  // Verified no-billing models from firebase.google.com/docs/ai-logic/models (Nov 2026)
+  cloudAuditModel: "gemini-3.8-flash",
   cloudFastFallbackModel: "gemini-3.5-flash-lite",
   strictLocalFirewall: true,
   cloudEscalationMode: "ONLY_IN_CLOUD",

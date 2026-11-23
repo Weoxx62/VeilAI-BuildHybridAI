@@ -1,4 +1,8 @@
-# 🛡️ VeilAI — Zero-Leak Split-Brain Hybrid AI Workspace
+<p align="left">
+  <img src="./docs/veilai-logo.svg" width="56" height="56" alt="VeilAI Logo" />
+</p>
+
+# VeilAI — Zero-Leak Split-Brain Hybrid AI Workspace
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Hackathon](https://img.shields.io/badge/Google-%23BuildHybridAI_2026-orange.svg)](https://firebasehybridaihackathon.devpost.com/)

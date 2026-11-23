@@ -244,6 +244,7 @@ export function App() {
 
   const previewUrlRef = useRef<string | null>(null);
   const runIdRef = useRef(0);
+  const qaRunIdRef = useRef(0);
 
   useEffect(() => {
     if (!isRunningShield) {
@@ -308,6 +309,8 @@ export function App() {
   };
 
   const resetAnalysisState = () => {
+    qaRunIdRef.current += 1;
+    setIsAskingQa(false);
     setWirePayload("");
     setCloudReportAnonymized(null);
     setRehydratedReport(null);
@@ -757,6 +760,7 @@ export function App() {
       setErrorBanner("Connect Firebase in apps/web/.env.local to ask via anonymized cloud.");
       return;
     }
+    const currentQaId = ++qaRunIdRef.current;
     setErrorBanner(null);
     setIsAskingQa(true);
     setQaStreamingAnswer("");
@@ -770,8 +774,15 @@ export function App() {
         policy,
         entities: redaction.entities,
         preferLocal,
-        onChunk: (partial) => setQaStreamingAnswer(partial),
+        allowCloudFallback: effectiveOnline && services.isConfigured,
+        onChunk: (partial) => {
+          if (qaRunIdRef.current === currentQaId) {
+            setQaStreamingAnswer(partial);
+          }
+        },
       });
+
+      if (qaRunIdRef.current !== currentQaId) return;
 
       setQaMessages((prev) => [
         ...prev,
@@ -790,12 +801,16 @@ export function App() {
       setTraces((prev) => [...prev, res.trace]);
       setTelemetry((prev) => accumulateTelemetry(prev, [res.trace], 0, 0, false));
     } catch (err) {
-      setErrorBanner(
-        err instanceof Error ? `Q&A failed: ${err.message}` : "Could not answer question.",
-      );
+      if (qaRunIdRef.current === currentQaId) {
+        setErrorBanner(
+          err instanceof Error ? `Q&A failed: ${err.message}` : "Could not answer question.",
+        );
+      }
     } finally {
-      setIsAskingQa(false);
-      setQaStreamingAnswer("");
+      if (qaRunIdRef.current === currentQaId) {
+        setIsAskingQa(false);
+        setQaStreamingAnswer("");
+      }
     }
   };
 

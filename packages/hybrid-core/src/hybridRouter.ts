@@ -21,7 +21,6 @@ import {
   LOCAL_TRIAGE_FIREBASE_SCHEMA,
   LOCAL_TRIAGE_JSON_SCHEMA,
   ON_DEVICE_IMAGE_PII_JSON_SCHEMA,
-  ON_DEVICE_PII_JSON_SCHEMA,
 } from "./schemas.js";
 import type {
   AuditReport,
@@ -74,6 +73,101 @@ async function withTimeout<T>(
   } finally {
     if (timerId !== undefined) clearTimeout(timerId);
   }
+}
+
+/**
+ * Deduplicated resilient cascade of verified no-billing Gemini Cloud models
+ * so transient 500/503/429 spikes on one model never break a live review.
+ */
+function buildCloudModelCascade(primary: string, fastFallback: string): string[] {
+  const ordered = [
+    primary,
+    "gemini-3.8-flash",
+    fastFallback,
+    "gemini-3.5-flash-lite",
+    "gemini-4-hydrogen",
+  ];
+  const unique: string[] = [];
+  for (const m of ordered) {
+    const clean = m.trim();
+    if (clean && !unique.includes(clean)) unique.push(clean);
+  }
+  return unique;
+}
+
+function runLocalStructuralHeuristics(text: string): DetectedSpan[] {
+  const hits: DetectedSpan[] = [];
+  const labeledNameRegex =
+    /(?:Patient Name|Ordering Physician|Prepared for|Author|represented by|and)\s*[:\-]?\s*((?:Dr\.\s+)?[A-Z][a-z]+(?:\s+[A-Z]['a-zA-Z]+){1,2})/g;
+  let m: RegExpExecArray | null;
+  while ((m = labeledNameRegex.exec(text)) !== null) {
+    const candidate = m[1].trim();
+    if (
+      candidate.length >= 5 &&
+      !/^(Agreement|Section|Company|Employee|Annual|Clinical)$/i.test(candidate)
+    ) {
+      hits.push({
+        category: "PERSON",
+        original: candidate,
+        source: "regex-guard",
+        confidence: 0.86,
+      });
+    }
+  }
+  const labeledAddrRegex =
+    /(?:residing at|Home Address|Residence)\s*[:\-]?\s*([0-9]{1,5}\s+[^\n()]{10,75})/gi;
+  while ((m = labeledAddrRegex.exec(text)) !== null) {
+    const candidate = m[1].replace(/[,.]\s*(?:email|phone).*$/i, "").trim();
+    if (candidate.length >= 10) {
+      hits.push({
+        category: "ADDRESS",
+        original: candidate,
+        source: "regex-guard",
+        confidence: 0.84,
+      });
+    }
+  }
+  const companyRegex =
+    /\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,3}\s+(?:SAS|LLC|Inc\.?|Ltd\.?|GmbH|Corp\.?|Laboratory))\b/g;
+  while ((m = companyRegex.exec(text)) !== null) {
+    hits.push({
+      category: "COMPANY",
+      original: m[1].trim(),
+      source: "regex-guard",
+      confidence: 0.88,
+    });
+  }
+  return hits;
+}
+
+async function streamModelWithTimeout(params: {
+  runStream: (signal: AbortSignal) => Promise<{
+    stream: AsyncGenerator<{ text: () => string }>;
+    response: Promise<{ text: () => string; inferenceSource?: InferenceSource }>;
+  }>;
+  timeoutMs: number;
+  label: string;
+  onRawAccumulated: (raw: string) => void;
+}): Promise<{ text: string; inferenceSource?: InferenceSource }> {
+  const { runStream, timeoutMs, label, onRawAccumulated } = params;
+  return withTimeout(
+    async (signal) => {
+      const streamResult = await runStream(signal);
+      let accumulated = "";
+      for await (const chunk of streamResult.stream) {
+        if (signal.aborted) break;
+        accumulated += chunk.text();
+        onRawAccumulated(accumulated);
+      }
+      const finalResponse = await streamResult.response;
+      return {
+        text: (accumulated || finalResponse.text()).trim(),
+        inferenceSource: finalResponse.inferenceSource,
+      };
+    },
+    timeoutMs,
+    label,
+  );
 }
 
 /**
@@ -269,11 +363,14 @@ export async function runStage1LocalShield(params: {
   let modelUsed = "Local Deterministic Regex Vault";
   let note: string | undefined;
 
-  // Instant <5ms deterministic Regex Guard pre-pass so UI lights up immediately
-  // AND Gemini Nano 4 only needs to extract remaining semantic entities (4-5x faster!).
+  // Instant <5ms deterministic Regex Guard + structural heuristics pre-pass so UI lights up
+  // immediately without ever losing entity highlights while Gemini Nano 4 runs locally.
   const initialRegexDetections =
     !imagePart && workingText.trim().length > 0
-      ? runDeterministicRegexGuard(workingText, profile, allowedCategories)
+      ? [
+          ...runDeterministicRegexGuard(workingText, profile, allowedCategories),
+          ...runLocalStructuralHeuristics(workingText),
+        ]
       : [];
   const quickVault =
     !imagePart && workingText.trim().length > 0
@@ -352,7 +449,7 @@ export async function runStage1LocalShield(params: {
 
         const result = await withTimeout(
           (signal) => visionModel.generateContent([visionPrompt, imagePart], { signal }),
-          params.timeoutMs ?? 65_000,
+          params.timeoutMs ?? 28_000,
           "Gemini Nano 4 Vision",
         );
         const parsed = safeJsonParse<{
@@ -392,6 +489,7 @@ export async function runStage1LocalShield(params: {
         modelUsed = "Gemini Nano 4 Vision (ONLY_ON_DEVICE)";
         note = "Multimodal OCR + PII redaction executed 100% locally in Chrome via Firebase AI Logic.";
       } else {
+        // Skip heavy XGrammar responseConstraint on text Stage 1 so Nano 4 stays fast (2-5s vs 45s cold compile)
         const nanoModel = getGenerativeModel(ai, {
           mode: InferenceMode.ONLY_ON_DEVICE,
           onDeviceParams: {
@@ -399,22 +497,19 @@ export async function runStage1LocalShield(params: {
               expectedInputs: [{ type: "text", languages: ["en"] }],
               expectedOutputs: [{ type: "text", languages: ["en"] }],
             },
-            promptOptions: {
-              responseConstraint: ON_DEVICE_PII_JSON_SCHEMA,
-            },
           },
         });
 
         const textPrompt = [
-          `Extract exact verbatim strings for person names ("persons"), company/organization names ("companies"), and street addresses ("addresses") from the text below.`,
-          `Ignore any [TOKEN_N] placeholders. Return concise JSON only.`,
+          `Find any remaining personal names, company names, or street addresses NOT already replaced by [TOKEN_N] in the excerpt below.`,
+          `Reply ONLY with compact JSON: {"persons":[],"companies":[],"addresses":[]}`,
           ``,
-          (quickVault?.scrubbedText ?? workingText).slice(0, 4500),
+          (quickVault?.scrubbedText ?? workingText).slice(0, 1800),
         ].join("\n");
 
         const result = await withTimeout(
           (signal) => nanoModel.generateContent(textPrompt, { signal }),
-          params.timeoutMs ?? 45_000,
+          params.timeoutMs ?? 12_000,
           "Gemini Nano 4 Shield",
         );
         const parsed = safeJsonParse<{
@@ -484,48 +579,7 @@ export async function runStage1LocalShield(params: {
   );
 
   // Layer lightweight local structural name/address/company heuristics as defense-in-depth
-  // so no labeled name or address is ever missed even if Nano misses a span or is downloading
-  const defenseInDepthHeuristics: DetectedSpan[] = [];
-  const labeledNameRegex =
-    /(?:Patient Name|Ordering Physician|Prepared for|Author|represented by|and)\s*[:\-]?\s*((?:Dr\.\s+)?[A-Z][a-z]+(?:\s+[A-Z]['a-zA-Z]+){1,2})/g;
-  let m: RegExpExecArray | null;
-  while ((m = labeledNameRegex.exec(workingText)) !== null) {
-    const candidate = m[1].trim();
-    if (
-      candidate.length >= 5 &&
-      !/^(Agreement|Section|Company|Employee|Annual|Clinical)$/i.test(candidate)
-    ) {
-      defenseInDepthHeuristics.push({
-        category: "PERSON",
-        original: candidate,
-        source: "regex-guard",
-        confidence: 0.85,
-      });
-    }
-  }
-  const labeledAddrRegex =
-    /(?:residing at|Home Address|Residence)\s*[:\-]?\s*([0-9]{1,5}\s+[^\n()]{10,75})/gi;
-  while ((m = labeledAddrRegex.exec(workingText)) !== null) {
-    const candidate = m[1].replace(/[,.]\s*(?:email|phone).*$/i, "").trim();
-    if (candidate.length >= 10) {
-      defenseInDepthHeuristics.push({
-        category: "ADDRESS",
-        original: candidate,
-        source: "regex-guard",
-        confidence: 0.84,
-      });
-    }
-  }
-  const companyRegex =
-    /\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,3}\s+(?:SAS|LLC|Inc\.?|Ltd\.?|GmbH|Corp\.?|Laboratory))\b/g;
-  while ((m = companyRegex.exec(workingText)) !== null) {
-    defenseInDepthHeuristics.push({
-      category: "COMPANY",
-      original: m[1].trim(),
-      source: "regex-guard",
-      confidence: 0.87,
-    });
-  }
+  const defenseInDepthHeuristics = runLocalStructuralHeuristics(workingText);
 
   const vault = buildVaultAndScrub(
     workingText,
@@ -729,47 +783,77 @@ export async function runStage2CloudAudit(params: {
       ? InferenceMode.PREFER_IN_CLOUD
       : InferenceMode.ONLY_IN_CLOUD;
 
-  const startedAt = performance.now();
+  const modelCascade = buildCloudModelCascade(
+    policy.cloudAuditModel,
+    policy.cloudFastFallbackModel,
+  );
 
-  const model = getGenerativeModel(ai, {
-    mode: requestedMode,
-    inCloudParams: {
-      model: policy.cloudAuditModel,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: DEEP_AUDIT_FIREBASE_SCHEMA,
-      },
-    },
-    ...(requestedMode === InferenceMode.PREFER_IN_CLOUD
-      ? {
-        onDeviceParams: {
-          createOptions: {
-            expectedInputs: [{ type: "text", languages: ["en"] }],
-            expectedOutputs: [{ type: "text", languages: ["en"] }],
-          },
-          promptOptions: {
-            responseConstraint: DEEP_AUDIT_JSON_SCHEMA,
+  const startedAt = performance.now();
+  let chosenModel = modelCascade[0];
+  let inferenceSource: InferenceSourceTag = "IN_CLOUD";
+  let parsed: AuditReport | null = null;
+  let failoverNote = "";
+  let lastError: unknown = null;
+
+  for (let i = 0; i < modelCascade.length; i++) {
+    const candidateModel = modelCascade[i];
+    try {
+      const model = getGenerativeModel(ai, {
+        mode: requestedMode,
+        inCloudParams: {
+          model: candidateModel,
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: DEEP_AUDIT_FIREBASE_SCHEMA,
           },
         },
+        ...(requestedMode === InferenceMode.PREFER_IN_CLOUD
+          ? {
+              onDeviceParams: {
+                createOptions: {
+                  expectedInputs: [{ type: "text", languages: ["en"] }],
+                  expectedOutputs: [{ type: "text", languages: ["en"] }],
+                },
+                promptOptions: {
+                  responseConstraint: DEEP_AUDIT_JSON_SCHEMA,
+                },
+              },
+            }
+          : {}),
+      });
+
+      const result = await withTimeout(
+        (signal) => model.generateContent(wirePayload, { signal }),
+        30_000,
+        `Cloud Deep Audit (${candidateModel})`,
+      );
+      const attemptParsed = safeJsonParse<AuditReport>(result.response.text());
+      if (!attemptParsed || !Array.isArray(attemptParsed.findings)) {
+        throw new Error(`Model ${candidateModel} returned malformed structured JSON.`);
       }
-      : {}),
-  });
 
-  const result = await withTimeout(
-    (signal) => model.generateContent(wirePayload, { signal }),
-    45_000,
-    "Cloud Deep Audit",
-  );
-  const cloudLatencyMs = Math.max(1, Math.round(performance.now() - startedAt));
-  const inferenceSource = mapSdkInferenceSource(
-    result.response.inferenceSource,
-    "IN_CLOUD",
-  );
-
-  const parsed = safeJsonParse<AuditReport>(result.response.text());
-  if (!parsed || !Array.isArray(parsed.findings)) {
-    throw new Error("Cloud audit returned malformed structured JSON.");
+      chosenModel = candidateModel;
+      inferenceSource = mapSdkInferenceSource(
+        result.response.inferenceSource,
+        "IN_CLOUD",
+      );
+      parsed = attemptParsed;
+      if (i > 0) {
+        failoverNote = ` Automatic failover from ${modelCascade[0]} to ${candidateModel}.`;
+      }
+      break;
+    } catch (err) {
+      lastError = err;
+      // Continue cascading on transient 500/503/429/high-demand/timeout/JSON issues
+    }
   }
+
+  if (!parsed) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("All cloud Gemini models are temporarily unavailable.");
+  }
+  const cloudLatencyMs = Math.max(1, Math.round(performance.now() - startedAt));
 
   const normalizedReport: AuditReport = {
     riskScore: Math.max(0, Math.min(100, Math.round(Number(parsed.riskScore) || 72))),
@@ -828,13 +912,13 @@ export async function runStage2CloudAudit(params: {
     inferenceSource,
     modelUsed:
       inferenceSource === "IN_CLOUD"
-        ? `${policy.cloudAuditModel} (Firebase AI Logic + App Check)`
+        ? `${chosenModel} (Firebase AI Logic + App Check)`
         : "Gemini Nano 4 (PREFER_IN_CLOUD Offline Fallback)",
     latencyMs: cloudLatencyMs,
     bytesSentToCloud: bytesSent,
     piiLeakedBytes: 0,
     timestamp: Date.now(),
-    note: `Zero-Leak wire guard verified 0 PII bytes across ${bytesSent.toLocaleString()} outbound bytes.`,
+    note: `Zero-Leak wire guard verified 0 PII bytes across ${bytesSent.toLocaleString()} outbound bytes.${failoverNote}`,
   };
 
   const stage3Trace: PipelineStageTrace = {
@@ -975,19 +1059,6 @@ export async function streamLocalRewrite(params: {
     throw new Error("Zero-Leak Guard blocked rewrite on unredacted text.");
   }
 
-  const model = getGenerativeModel(ai, {
-    mode: InferenceMode.PREFER_ON_DEVICE,
-    onDeviceParams: {
-      createOptions: {
-        expectedInputs: [{ type: "text", languages: ["en"] }],
-        expectedOutputs: [{ type: "text", languages: ["en"] }],
-      },
-    },
-    inCloudParams: {
-      model: policy.cloudFastFallbackModel,
-    },
-  });
-
   const prompt = [
     `Rewrite or draft a concise, ready-to-send response based on this instruction: ${instruction}`,
     `Preserve every placeholder token (e.g. [PERSON_1], [COMPANY_1], [SALARY_1], [IBAN_1]) exactly as written.`,
@@ -996,30 +1067,77 @@ export async function streamLocalRewrite(params: {
     scrubbedExcerpt,
   ].join("\n");
 
-  const streamResult = await model.generateContentStream(prompt);
-  let accumulated = "";
+  let finalRaw = "";
+  let inferenceSource: InferenceSourceTag = "ON_DEVICE";
+  let modelUsed = "Gemini Nano 4 Stream";
 
-  for await (const chunk of streamResult.stream) {
-    accumulated += chunk.text();
-    onChunk(rehydrateText(accumulated, entities));
+  try {
+    const model = getGenerativeModel(ai, {
+      mode: InferenceMode.PREFER_ON_DEVICE,
+      onDeviceParams: {
+        createOptions: {
+          expectedInputs: [{ type: "text", languages: ["en"] }],
+          expectedOutputs: [{ type: "text", languages: ["en"] }],
+        },
+      },
+      inCloudParams: {
+        model: policy.cloudFastFallbackModel,
+      },
+    });
+    const res = await streamModelWithTimeout({
+      runStream: (signal) => model.generateContentStream(prompt, { signal }),
+      timeoutMs: 18_000,
+      label: "Local Rewrite Stream",
+      onRawAccumulated: (acc) => onChunk(rehydrateText(acc, entities)),
+    });
+    finalRaw = res.text;
+    inferenceSource = mapSdkInferenceSource(res.inferenceSource, "ON_DEVICE");
+    modelUsed =
+      inferenceSource === "ON_DEVICE"
+        ? "Gemini Nano 4 Stream"
+        : `${policy.cloudFastFallbackModel} Stream`;
+  } catch (localErr) {
+    // Resilient anonymized cloud fallback if on-device Nano stalls while online
+    const cascade = buildCloudModelCascade(
+      policy.cloudFastFallbackModel,
+      policy.cloudAuditModel,
+    );
+    let succeeded = false;
+    let lastErr: unknown = localErr;
+    for (const candidateModel of cascade) {
+      try {
+        const cloudModel = getGenerativeModel(ai, {
+          mode: InferenceMode.ONLY_IN_CLOUD,
+          inCloudParams: { model: candidateModel },
+        });
+        const res = await streamModelWithTimeout({
+          runStream: (signal) => cloudModel.generateContentStream(prompt, { signal }),
+          timeoutMs: 25_000,
+          label: `Cloud Rewrite (${candidateModel})`,
+          onRawAccumulated: (acc) => onChunk(rehydrateText(acc, entities)),
+        });
+        finalRaw = res.text;
+        inferenceSource = mapSdkInferenceSource(res.inferenceSource, "IN_CLOUD");
+        modelUsed = `${candidateModel} Stream (Fallback)`;
+        succeeded = true;
+        break;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!succeeded) {
+      throw lastErr instanceof Error ? lastErr : new Error("Rewrite timed out.");
+    }
   }
 
-  const finalResponse = await streamResult.response;
-  const inferenceSource = mapSdkInferenceSource(
-    finalResponse.inferenceSource,
-    "ON_DEVICE",
-  );
   const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
-  const finalText = rehydrateText(accumulated || finalResponse.text(), entities);
+  const finalText = rehydrateText(finalRaw, entities);
 
   const trace: PipelineStageTrace = {
     stage: "LOCAL_REWRITE",
     modeRequested: "InferenceMode.PREFER_ON_DEVICE (Streaming)",
     inferenceSource,
-    modelUsed:
-      inferenceSource === "ON_DEVICE"
-        ? "Gemini Nano 4 Stream"
-        : `${policy.cloudFastFallbackModel} Stream`,
+    modelUsed,
     latencyMs,
     bytesSentToCloud:
       inferenceSource === "IN_CLOUD"
@@ -1038,7 +1156,7 @@ export async function streamLocalRewrite(params: {
  * Scrubs the user's follow-up question locally in RAM using the active Vault + Regex Guard,
  * verifies 0 bytes of raw PII remain, executes either on-device (`PREFER_ON_DEVICE`, $0.00 / offline)
  * or via cloud (`ONLY_IN_CLOUD` + App Check on anonymized tokens only), and re-hydrates the streamed
- * response strictly inside local browser RAM.
+ * response strictly inside local browser RAM. Includes strict timeout & cloud cascade failover.
  */
 export async function askDocumentHybrid(params: {
   ai: AI;
@@ -1049,6 +1167,7 @@ export async function askDocumentHybrid(params: {
   policy: RemotePolicyConfig;
   entities: VaultEntity[];
   preferLocal: boolean;
+  allowCloudFallback?: boolean;
   onChunk?: (rehydratedPartial: string) => void;
 }): Promise<{
   scrubbedQuestion: string;
@@ -1065,12 +1184,12 @@ export async function askDocumentHybrid(params: {
     policy,
     entities,
     preferLocal,
+    allowCloudFallback = true,
     onChunk,
   } = params;
 
   const startedAt = performance.now();
 
-  // Scrub the user's question against existing vault entities AND run regex guard on new secrets
   const questionApplied = applyVaultRedaction(question.trim(), entities);
   const extraRegexHits = runDeterministicRegexGuard(
     questionApplied.scrubbedText,
@@ -1095,64 +1214,113 @@ export async function askDocumentHybrid(params: {
     );
   }
 
-  const prompt = [
-    `You are a calm, practical ${domain} advisor answering a follow-up question about an anonymized document.`,
-    `Keep all placeholder tokens (like [PERSON_1], [COMPANY_1], [SALARY_1], [IBAN_1], [API_KEY_1]) verbatim so the user's browser can restore them locally.`,
-    `Answer clearly and concisely in 3-5 sentences (or crisp bullets) directly grounded in the document.`,
-    ``,
-    `--- ANONYMIZED DOCUMENT ---`,
-    scrubbedText.slice(0, preferLocal ? 3600 : 7500),
-    `--- END DOCUMENT ---`,
-    ``,
-    `QUESTION: ${scrubbedQuestion}`,
-  ].join("\n");
+  const buildPrompt = (maxDocChars: number) =>
+    [
+      `You are a calm, practical ${domain} advisor answering a follow-up question about an anonymized document.`,
+      `Keep all placeholder tokens (like [PERSON_1], [COMPANY_1], [SALARY_1], [IBAN_1], [API_KEY_1]) verbatim so the user's browser can restore them locally.`,
+      `Answer clearly and concisely in 3-5 sentences (or crisp bullets) directly grounded in the document.`,
+      ``,
+      `--- ANONYMIZED DOCUMENT ---`,
+      scrubbedText.slice(0, maxDocChars),
+      `--- END DOCUMENT ---`,
+      ``,
+      `QUESTION: ${scrubbedQuestion}`,
+    ].join("\n");
 
-  const finalGuard = verifyZeroLeak(prompt, entities);
-  if (!finalGuard.verified) {
+  const localPrompt = buildPrompt(2200);
+  const cloudPrompt = buildPrompt(7500);
+
+  if (!verifyZeroLeak(cloudPrompt, entities).verified) {
     throw new Error("HARD ZERO-LEAK BLOCK: Outbound Q&A prompt failed final scan.");
   }
 
-  const model = preferLocal
-    ? getGenerativeModel(ai, {
-        mode: InferenceMode.PREFER_ON_DEVICE,
+  let anonymizedAnswer = "";
+  let inferenceSource: InferenceSourceTag = preferLocal ? "ON_DEVICE" : "IN_CLOUD";
+  let modelUsed = "Gemini Nano 4 Q&A (Local)";
+  let noteSuffix = "";
+  let executedLocally = false;
+
+  if (preferLocal) {
+    try {
+      const localModel = getGenerativeModel(ai, {
+        mode: allowCloudFallback
+          ? InferenceMode.PREFER_ON_DEVICE
+          : InferenceMode.ONLY_ON_DEVICE,
         onDeviceParams: {
           createOptions: {
             expectedInputs: [{ type: "text", languages: ["en"] }],
             expectedOutputs: [{ type: "text", languages: ["en"] }],
           },
         },
-        inCloudParams: {
-          model: policy.cloudFastFallbackModel,
-        },
-      })
-    : getGenerativeModel(ai, {
-        mode: InferenceMode.ONLY_IN_CLOUD,
-        inCloudParams: {
-          model: policy.cloudAuditModel,
-        },
+        ...(allowCloudFallback
+          ? { inCloudParams: { model: policy.cloudFastFallbackModel } }
+          : {}),
       });
-
-  const streamResult = await model.generateContentStream(prompt);
-  let accumulated = "";
-
-  for await (const chunk of streamResult.stream) {
-    accumulated += chunk.text();
-    if (onChunk) {
-      onChunk(rehydrateText(accumulated, entities));
+      const res = await streamModelWithTimeout({
+        runStream: (signal) => localModel.generateContentStream(localPrompt, { signal }),
+        timeoutMs: 14_000,
+        label: "On-Device Private Q&A",
+        onRawAccumulated: (acc) => onChunk?.(rehydrateText(acc, entities)),
+      });
+      anonymizedAnswer = res.text;
+      inferenceSource = mapSdkInferenceSource(res.inferenceSource, "ON_DEVICE");
+      modelUsed =
+        inferenceSource === "ON_DEVICE"
+          ? "Gemini Nano 4 Q&A (Local)"
+          : `${policy.cloudFastFallbackModel} Q&A (App Check)`;
+      executedLocally = true;
+    } catch (localErr) {
+      if (!allowCloudFallback) {
+        throw new Error(
+          localErr instanceof Error
+            ? `Offline on-device Q&A unavailable (${localErr.message}). Reconnect or try again.`
+            : "Offline on-device Q&A timed out.",
+        );
+      }
+      noteSuffix = " On-device model busy; safely routed anonymized question to cloud.";
     }
   }
 
-  const finalResponse = await streamResult.response;
-  const inferenceSource = mapSdkInferenceSource(
-    finalResponse.inferenceSource,
-    preferLocal ? "ON_DEVICE" : "IN_CLOUD",
-  );
-  const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
-  const anonymizedAnswer = (accumulated || finalResponse.text()).trim();
-  const rehydratedAnswer = rehydrateText(anonymizedAnswer, entities);
+  if (!executedLocally) {
+    const cascade = buildCloudModelCascade(
+      preferLocal ? policy.cloudFastFallbackModel : policy.cloudAuditModel,
+      policy.cloudAuditModel,
+    );
+    let lastErr: unknown = null;
+    let succeeded = false;
+    for (const candidateModel of cascade) {
+      try {
+        const cloudModel = getGenerativeModel(ai, {
+          mode: InferenceMode.ONLY_IN_CLOUD,
+          inCloudParams: { model: candidateModel },
+        });
+        const res = await streamModelWithTimeout({
+          runStream: (signal) => cloudModel.generateContentStream(cloudPrompt, { signal }),
+          timeoutMs: 25_000,
+          label: `Cloud Q&A (${candidateModel})`,
+          onRawAccumulated: (acc) => onChunk?.(rehydrateText(acc, entities)),
+        });
+        anonymizedAnswer = res.text;
+        inferenceSource = mapSdkInferenceSource(res.inferenceSource, "IN_CLOUD");
+        modelUsed = `${candidateModel} Q&A (App Check)`;
+        succeeded = true;
+        break;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!succeeded) {
+      throw lastErr instanceof Error
+        ? lastErr
+        : new Error("Cloud Q&A models are temporarily unavailable.");
+    }
+  }
 
+  const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
+  const rehydratedAnswer = rehydrateText(anonymizedAnswer, entities);
+  const usedPrompt = inferenceSource === "IN_CLOUD" ? cloudPrompt : localPrompt;
   const bytesSent =
-    inferenceSource === "IN_CLOUD" ? new TextEncoder().encode(prompt).length : 0;
+    inferenceSource === "IN_CLOUD" ? new TextEncoder().encode(usedPrompt).length : 0;
 
   const trace: PipelineStageTrace = {
     stage: "DOCUMENT_QA",
@@ -1160,15 +1328,12 @@ export async function askDocumentHybrid(params: {
       ? "InferenceMode.PREFER_ON_DEVICE (Private Q&A)"
       : "InferenceMode.ONLY_IN_CLOUD (Deep Q&A)",
     inferenceSource,
-    modelUsed:
-      inferenceSource === "ON_DEVICE"
-        ? "Gemini Nano 4 Q&A (Local)"
-        : `${preferLocal ? policy.cloudFastFallbackModel : policy.cloudAuditModel} Q&A (App Check)`,
+    modelUsed,
     latencyMs,
     bytesSentToCloud: bytesSent,
     piiLeakedBytes: 0,
     timestamp: Date.now(),
-    note: `Question & document scrubbed locally (0B PII leaked across ${bytesSent.toLocaleString()}B).`,
+    note: `Question & document scrubbed locally (0B PII leaked across ${bytesSent.toLocaleString()}B).${noteSuffix}`,
   };
 
   return {

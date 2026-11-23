@@ -10,9 +10,9 @@
     },
     "cloud_audit_model": {
       "defaultValue": {
-        "value": "gemini-4-hydrogen"
+        "value": "gemini-3.8-flash"
       },
-      "description": "Cloud Gemini model used via Firebase AI Logic ONLY_IN_CLOUD / PREFER_IN_CLOUD for deep expert audits on strictly scrubbed payloads (no billing required).",
+      "description": "Primary Cloud Gemini model used via Firebase AI Logic ONLY_IN_CLOUD / PREFER_IN_CLOUD for deep expert audits on strictly scrubbed payloads (no billing required; cascades automatically on overload).",
       "valueType": "STRING"
     },
     "cloud_fast_fallback_model": {

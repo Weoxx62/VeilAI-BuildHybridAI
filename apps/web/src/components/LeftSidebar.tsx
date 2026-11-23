@@ -17,6 +17,7 @@ import {
   type ChromeAICapability,
   type DemoScenario,
 } from "@veilai/hybrid-core";
+import { VeilLogo } from "./VeilLogo";
 
 interface LeftSidebarProps {
   activeScenarioId: string | null;
@@ -65,24 +66,8 @@ export function LeftSidebar({
       {/* Brand */}
       <div className="flex h-14 items-center justify-between px-4">
         <div className="flex items-center gap-2.5">
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 64 64"
-            aria-hidden="true"
-            className="shrink-0"
-          >
-            <rect width="64" height="64" rx="14" fill="#26262A" />
-            <path
-              d="M32 10L14 17v13c0 12.2 7.7 22.8 18 26V10z"
-              fill="#EAE9E5"
-            />
-            <path
-              d="M32 10l18 7v13c0 12.2-7.7 22.8-18 26V10z"
-              fill="#6EE7B7"
-            />
-          </svg>
-          <span className="text-[14px] font-semibold tracking-[-0.015em] text-[#F4F3EF]">
+          <VeilLogo size={24} />
+          <span className="text-[14.5px] font-semibold tracking-[-0.02em] text-[#F4F3EF]">
             VeilAI
           </span>
         </div>
