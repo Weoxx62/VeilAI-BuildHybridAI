@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment & Secrets (NEVER commit keys, secrets, or App Check debug tokens)
+.env
+.env.local
+.env.*.local
+
+# Firebase local cache & logs
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+
+# Personal planning & submission scratchpad (keep public GitHub repository clean & 100% English)
+PLAN_BATAILLE_FR.md
+DEVPOST_SUBMISSION_KIT.md
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo

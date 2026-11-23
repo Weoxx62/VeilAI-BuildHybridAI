@@ -1,0 +1,26 @@
+{
+  "name": "veilai-buildhybridai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VeilAI — Zero-Leak Split-Brain Hybrid AI Workspace built with Firebase AI Logic",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=@veilai/web",
+    "build:core": "npm run build --workspace=@veilai/hybrid-core",
+    "build:web": "npm run build --workspace=@veilai/web",
+    "build:extension": "npm run build --workspace=@veilai/extension",
+    "build": "npm run build:core && npm run build:web && npm run build:extension",
+    "typecheck": "npm run typecheck --workspace=@veilai/hybrid-core && npm run typecheck --workspace=@veilai/web && npm run typecheck --workspace=@veilai/extension",
+    "test": "npm run test --workspace=@veilai/hybrid-core",
+    "deploy:hosting": "npm run build:web && npx -y firebase-tools@latest deploy --only hosting",
+    "deploy:rules": "npx -y firebase-tools@latest deploy --only firestore:rules",
+    "deploy:rc": "npx -y firebase-tools@latest deploy --only remoteconfig"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

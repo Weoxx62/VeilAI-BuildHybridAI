@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "VeilAI — Zero-Leak Hybrid AI Side Panel",
+  "version": "1.0.0",
+  "description": "Scrub PII and secrets locally with Gemini Nano 4 via Firebase AI Logic before auditing Gmail, Google Docs, or GitHub PRs with Gemini Cloud.",
+  "permissions": ["sidePanel", "activeTab", "scripting", "storage"],
+  "action": {
+    "default_title": "Open VeilAI Zero-Leak Side Panel",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mail.google.com/*",
+        "https://github.com/*",
+        "https://docs.google.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "conditions": [],
+  "parameters": {
+    "default_compliance_profile": {
+      "defaultValue": {
+        "value": "GDPR_EU"
+      },
+      "description": "Default VeilAI compliance routing profile: GDPR_EU | HIPAA_MEDICAL | DEVSECOPS_CODE | FINANCIAL_TAX",
+      "valueType": "STRING"
+    },
+    "cloud_audit_model": {
+      "defaultValue": {
+        "value": "gemini-4-hydrogen"
+      },
+      "description": "Cloud Gemini model used via Firebase AI Logic ONLY_IN_CLOUD / PREFER_IN_CLOUD for deep expert audits on strictly scrubbed payloads (no billing required).",
+      "valueType": "STRING"
+    },
+    "cloud_fast_fallback_model": {
+      "defaultValue": {
+        "value": "gemini-3.5-flash-lite"
+      },
+      "description": "Fast cloud fallback model used for PREFER_ON_DEVICE triage & rewrites when on-device Gemini Nano 4 is unavailable.",
+      "valueType": "STRING"
+    },
+    "strict_local_firewall": {
+      "defaultValue": {
+        "value": "true"
+      },
+      "description": "When true, Stage 1 PII/Secret redaction strictly uses InferenceMode.ONLY_ON_DEVICE + deterministic local regex vault and never falls back to cloud with raw PII.",
+      "valueType": "BOOLEAN"
+    },
+    "cloud_escalation_mode": {
+      "defaultValue": {
+        "value": "ONLY_IN_CLOUD"
+      },
+      "description": "InferenceMode for Stage 2 deep audit: ONLY_IN_CLOUD or PREFER_IN_CLOUD (falls back to on-device if offline).",
+      "valueType": "STRING"
+    },
+    "compliance_profiles_json": {
+      "defaultValue": {
+        "value": "{\"GDPR_EU\":{\"label\":\"GDPR EU Legal & HR\",\"categories\":[\"PERSON\",\"EMAIL\",\"PHONE\",\"IBAN\",\"ADDRESS\",\"SALARY\",\"TAX_ID\",\"COMPANY\"],\"minSeverity\":\"MEDIUM\"},\"HIPAA_MEDICAL\":{\"label\":\"HIPAA Medical & Labs\",\"categories\":[\"PERSON\",\"DOB\",\"MEDICAL_ID\",\"SSN\",\"PHONE\",\"EMAIL\",\"ADDRESS\",\"INSURANCE_ID\"],\"minSeverity\":\"LOW\"},\"DEVSECOPS_CODE\":{\"label\":\"DevSecOps & Secrets\",\"categories\":[\"API_KEY\",\"AWS_KEY\",\"JWT\",\"PRIVATE_KEY\",\"DB_URI\",\"EMAIL\",\"IP_ADDRESS\",\"PASSWORD\"],\"minSeverity\":\"LOW\"},\"FINANCIAL_TAX\":{\"label\":\"Financial & Tax Audit\",\"categories\":[\"PERSON\",\"IBAN\",\"TAX_ID\",\"SSN\",\"SALARY\",\"ACCOUNT_NUMBER\",\"COMPANY\",\"ADDRESS\"],\"minSeverity\":\"MEDIUM\"}}"
+      },
+      "description": "JSON map of live enterprise redaction policies controlled remotely via Firebase Remote Config.",
+      "valueType": "JSON"
+    }
+  },
+  "parameterGroups": {}
+}

@@ -1,0 +1,398 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model — VeilAI (#BuildHybridAI 2026)
+// ===============================================================
+//
+// Authentication Model:
+//   - Supports BOTH Google Sign-In and 1-click Anonymous Guest Mode.
+//   - Every authenticated principal (Google or Anonymous) has a unique
+//     Firebase Auth `request.auth.uid` and strictly owns ONLY their own
+//     `/users/{userId}` document and `/users/{userId}/audits/{auditId}`
+//     subcollection. Anonymous users are intentionally allowed so judges
+//     can evaluate VeilAI via 1-click Guest Mode.
+//
+// Offline Persistence Assumption:
+//   - Both Web App and Chrome Extension enable Firestore Offline Persistence.
+//   - `createdAt` and `updatedAt` may be populated via client `Timestamp.now()`
+//     or `serverTimestamp()` while offline/queued. Therefore rules validate
+//     strict `timestamp` type (and `createdAt` immutability on update) rather
+//     than requiring `== request.time`, which would reject queued offline writes.
+//   - Same-user writes to `/users/{userId}/audits/{auditId}` do NOT require
+//     `exists(/users/{userId})` so concurrent or offline-queued audit writes
+//     never race against initial profile creation or incur extra read billing.
+//
+// Zero-Leak Privacy Architecture (Defense in Depth):
+//   - Raw user input, extracted PII, rehydrated reports, and the local
+//     placeholder vault NEVER leave browser RAM.
+//   - Firestore rules strictly enforce field allowlists (`hasOnly` + `hasAll`)
+//     so fields like `rawInput`, `originalText`, `vaultMap`, `secretMap`,
+//     `entities`, or `rehydratedReport` are categorically rejected at the
+//     database boundary.
+//   - `entityCounts` is further locked to the exact 20 `EntityCategory` keys
+//     with integer count values (0..1000), preventing PII smuggling inside maps.
+//
+// ---------------------------------------------------------------
+// Collection: /users/{userId}
+// Document ID: Firebase Auth UID (`userId == request.auth.uid`)
+// Access: Owner-only read, create, update, delete
+// Fields (all required; strict allowlist):
+//   - uid: string (1..128, immutable, must equal `userId`)
+//   - surface: string ('web' | 'extension')
+//   - activeComplianceProfile: string
+//       ('GDPR_EU' | 'HIPAA_MEDICAL' | 'DEVSECOPS_CODE' | 'FINANCIAL_TAX')
+//   - totalAudits: int (0..1000000)
+//   - totalPiiShielded: int (0..100000000)
+//   - onDeviceCalls: int (0..10000000)
+//   - inCloudCalls: int (0..10000000)
+//   - estimatedUsdSaved: number (0..1000000; accepts int or float)
+//   - createdAt: timestamp (immutable on update)
+//   - updatedAt: timestamp
+//
+// ---------------------------------------------------------------
+// Subcollection: /users/{userId}/audits/{auditId}
+// Document ID: Audit identifier (`auditId == data.id`)
+// Access: Owner-only read, create, update, delete
+// Supported Queries:
+//   - Direct document get/listen on `/users/{userId}/audits/{auditId}`
+//   - Collection list with `orderBy('createdAt', 'desc')`, optional
+//     `where('complianceProfile', '==', ...)`, and `limit(...)`
+// Fields (all required; strict allowlist — strictly anonymized metadata only):
+//   - id: string (1..128, immutable, must equal `auditId`)
+//   - title: string (1..160)
+//   - domain: string ('legal' | 'medical' | 'financial' | 'code' | 'general')
+//   - surface: string ('web' | 'extension')
+//   - complianceProfile: string
+//       ('GDPR_EU' | 'HIPAA_MEDICAL' | 'DEVSECOPS_CODE' | 'FINANCIAL_TAX')
+//   - inputModality: string ('text' | 'image')
+//   - scrubbedPreview: string (0..2000)
+//   - entityCounts: map (size <= 25; keys restricted to EntityCategory enum;
+//       each value int 0..1000)
+//   - totalEntitiesRedacted: int (0..1000)
+//   - bytesShielded: int (0..500000)
+//   - riskScore: int (0..100)
+//   - riskLevel: string ('LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL')
+//   - summary: string (0..2000)
+//   - findingsCount: int (0..100)
+//   - stage1Source: string ('ON_DEVICE' | 'LOCAL_REGEX_FALLBACK' | 'IN_CLOUD')
+//   - stage2Source: string ('IN_CLOUD' | 'ON_DEVICE' | 'OFFLINE_QUEUED')
+//   - stage1LatencyMs: int (0..600000)
+//   - stage2LatencyMs: int (0..600000)
+//   - cloudModel: string (1..80)
+//   - estimatedUsdSaved: number (0..100; accepts int or float)
+//   - createdAt: timestamp (immutable on update)
+//   - updatedAt: timestamp
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the caller is authenticated (Google Sign-In or Anonymous Guest Mode)
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if the authenticated caller owns the path-scoped user resource
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Check if the authenticated caller owns the existing document via its uid field
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    // Verify uid matches the authenticated caller on create
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == request.auth.uid;
+    }
+
+    // Verify uid has not been modified on update
+    function uidNotModified() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == resource.data.uid;
+    }
+
+    // Validate all required fields exist on the post-write document
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // Validate the post-write document contains ONLY allowlisted fields
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Validate immutable fields are untouched during an update
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // Validate string type and length bounds (prevents 1MB DoS payloads)
+    function isValidString(value, minLen, maxLen) {
+      return value is string &&
+        value.size() >= minLen &&
+        value.size() <= maxLen;
+    }
+
+    // Validate strict integer type and inclusive numeric bounds
+    function isValidIntRange(value, minVal, maxVal) {
+      return value is int &&
+        value >= minVal &&
+        value <= maxVal;
+    }
+
+    // Validate number (int or float) and inclusive numeric bounds (rejects NaN/Infinity)
+    function isValidNumberRange(value, minVal, maxVal) {
+      return value is number &&
+        value >= minVal &&
+        value <= maxVal;
+    }
+
+    // Enum validators matching @veilai/hybrid-core types.ts
+    function isValidSurface(surface) {
+      return surface is string && surface in ['web', 'extension'];
+    }
+
+    function isValidComplianceProfile(profile) {
+      return profile is string && profile in [
+        'GDPR_EU',
+        'HIPAA_MEDICAL',
+        'DEVSECOPS_CODE',
+        'FINANCIAL_TAX'
+      ];
+    }
+
+    function isValidDomain(domain) {
+      return domain is string && domain in [
+        'legal',
+        'medical',
+        'financial',
+        'code',
+        'general'
+      ];
+    }
+
+    function isValidInputModality(modality) {
+      return modality is string && modality in ['text', 'image'];
+    }
+
+    function isValidRiskLevel(level) {
+      return level is string && level in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+    }
+
+    function isValidStage1Source(src) {
+      return src is string && src in [
+        'ON_DEVICE',
+        'LOCAL_REGEX_FALLBACK',
+        'IN_CLOUD'
+      ];
+    }
+
+    function isValidStage2Source(src) {
+      return src is string && src in [
+        'IN_CLOUD',
+        'ON_DEVICE',
+        'OFFLINE_QUEUED'
+      ];
+    }
+
+    // Validate an optional category count inside the entityCounts map
+    function isValidOptionalEntityCount(counts, categoryKey) {
+      return !(categoryKey in counts) ||
+        isValidIntRange(counts[categoryKey], 0, 1000);
+    }
+
+    // Deep map validation for entityCounts: enforces size <= 25, strict
+    // EntityCategory key allowlist, and bounded integer counts (blocks PII smuggling)
+    function isValidEntityCounts(counts) {
+      let allowedCategories = [
+        'PERSON',
+        'EMAIL',
+        'PHONE',
+        'IBAN',
+        'SSN',
+        'TAX_ID',
+        'SALARY',
+        'ADDRESS',
+        'DOB',
+        'MEDICAL_ID',
+        'INSURANCE_ID',
+        'COMPANY',
+        'API_KEY',
+        'AWS_KEY',
+        'JWT',
+        'PRIVATE_KEY',
+        'DB_URI',
+        'IP_ADDRESS',
+        'PASSWORD',
+        'ACCOUNT_NUMBER'
+      ];
+
+      return counts is map &&
+        counts.size() <= 25 &&
+        counts.keys().hasOnly(allowedCategories) &&
+        isValidOptionalEntityCount(counts, 'PERSON') &&
+        isValidOptionalEntityCount(counts, 'EMAIL') &&
+        isValidOptionalEntityCount(counts, 'PHONE') &&
+        isValidOptionalEntityCount(counts, 'IBAN') &&
+        isValidOptionalEntityCount(counts, 'SSN') &&
+        isValidOptionalEntityCount(counts, 'TAX_ID') &&
+        isValidOptionalEntityCount(counts, 'SALARY') &&
+        isValidOptionalEntityCount(counts, 'ADDRESS') &&
+        isValidOptionalEntityCount(counts, 'DOB') &&
+        isValidOptionalEntityCount(counts, 'MEDICAL_ID') &&
+        isValidOptionalEntityCount(counts, 'INSURANCE_ID') &&
+        isValidOptionalEntityCount(counts, 'COMPANY') &&
+        isValidOptionalEntityCount(counts, 'API_KEY') &&
+        isValidOptionalEntityCount(counts, 'AWS_KEY') &&
+        isValidOptionalEntityCount(counts, 'JWT') &&
+        isValidOptionalEntityCount(counts, 'PRIVATE_KEY') &&
+        isValidOptionalEntityCount(counts, 'DB_URI') &&
+        isValidOptionalEntityCount(counts, 'IP_ADDRESS') &&
+        isValidOptionalEntityCount(counts, 'PASSWORD') &&
+        isValidOptionalEntityCount(counts, 'ACCOUNT_NUMBER');
+    }
+
+    // ===============================================================
+    // Domain Validators (Invoked on BOTH create and update)
+    // ===============================================================
+
+    function isValidUser(data, userId) {
+      let allowedFields = [
+        'uid',
+        'surface',
+        'activeComplianceProfile',
+        'totalAudits',
+        'totalPiiShielded',
+        'onDeviceCalls',
+        'inCloudCalls',
+        'estimatedUsdSaved',
+        'createdAt',
+        'updatedAt'
+      ];
+
+      return hasOnlyAllowedFields(allowedFields) &&
+        hasRequiredFields(allowedFields) &&
+        isValidString(data.uid, 1, 128) &&
+        data.uid == userId &&
+        isValidSurface(data.surface) &&
+        isValidComplianceProfile(data.activeComplianceProfile) &&
+        isValidIntRange(data.totalAudits, 0, 1000000) &&
+        isValidIntRange(data.totalPiiShielded, 0, 100000000) &&
+        isValidIntRange(data.onDeviceCalls, 0, 10000000) &&
+        isValidIntRange(data.inCloudCalls, 0, 10000000) &&
+        isValidNumberRange(data.estimatedUsdSaved, 0, 1000000) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAudit(data, auditId) {
+      let allowedFields = [
+        'id',
+        'title',
+        'domain',
+        'surface',
+        'complianceProfile',
+        'inputModality',
+        'scrubbedPreview',
+        'entityCounts',
+        'totalEntitiesRedacted',
+        'bytesShielded',
+        'riskScore',
+        'riskLevel',
+        'summary',
+        'findingsCount',
+        'stage1Source',
+        'stage2Source',
+        'stage1LatencyMs',
+        'stage2LatencyMs',
+        'cloudModel',
+        'estimatedUsdSaved',
+        'createdAt',
+        'updatedAt'
+      ];
+
+      return hasOnlyAllowedFields(allowedFields) &&
+        hasRequiredFields(allowedFields) &&
+        isValidString(data.id, 1, 128) &&
+        data.id == auditId &&
+        isValidString(data.title, 1, 160) &&
+        isValidDomain(data.domain) &&
+        isValidSurface(data.surface) &&
+        isValidComplianceProfile(data.complianceProfile) &&
+        isValidInputModality(data.inputModality) &&
+        isValidString(data.scrubbedPreview, 0, 2000) &&
+        isValidEntityCounts(data.entityCounts) &&
+        isValidIntRange(data.totalEntitiesRedacted, 0, 1000) &&
+        isValidIntRange(data.bytesShielded, 0, 500000) &&
+        isValidIntRange(data.riskScore, 0, 100) &&
+        isValidRiskLevel(data.riskLevel) &&
+        isValidString(data.summary, 0, 2000) &&
+        isValidIntRange(data.findingsCount, 0, 100) &&
+        isValidStage1Source(data.stage1Source) &&
+        isValidStage2Source(data.stage2Source) &&
+        isValidIntRange(data.stage1LatencyMs, 0, 600000) &&
+        isValidIntRange(data.stage2LatencyMs, 0, 600000) &&
+        isValidString(data.cloudModel, 1, 80) &&
+        isValidNumberRange(data.estimatedUsdSaved, 0, 100) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Strictly owner-only read (blocks cross-user & unauthenticated access)
+      allow read: if isOwner(userId);
+
+      // Owner-only create with strict schema, type, enum, and UID enforcement
+      allow create: if isOwner(userId) &&
+        uidUnchanged() &&
+        isValidUser(request.resource.data, userId);
+
+      // Owner-only update with immutable uid/createdAt + full domain validation
+      allow update: if isOwner(userId) &&
+        isDocOwner() &&
+        uidNotModified() &&
+        areImmutableFieldsUnchanged(['uid', 'createdAt']) &&
+        isValidUser(request.resource.data, userId);
+
+      // Owner-only delete
+      allow delete: if isOwner(userId);
+
+      // Strictly anonymized audit history synced across Web & Chrome Extension
+      match /audits/{auditId} {
+        // Strictly owner-only read (supports get, list, orderBy, where, limit)
+        allow read: if isOwner(userId);
+
+        // Zero-leak defense-in-depth create: blocks raw PII/vault fields & bounds sizes
+        allow create: if isOwner(userId) &&
+          isValidAudit(request.resource.data, auditId);
+
+        // Owner-only update with immutable id/createdAt + full domain validation
+        allow update: if isOwner(userId) &&
+          areImmutableFieldsUnchanged(['id', 'createdAt']) &&
+          isValidAudit(request.resource.data, auditId);
+
+        // Owner-only delete
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // ===============================================================
+    // Default Deny — Block all unmatched paths and subcollections
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
