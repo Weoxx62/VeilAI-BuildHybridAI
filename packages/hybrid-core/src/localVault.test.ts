@@ -10,7 +10,7 @@ import {
 } from "./localVault.js";
 import { DEMO_SCENARIOS } from "./scenarios.js";
 import { computeLocalSharePercent, createInitialTelemetry } from "./telemetry.js";
-import { buildZeroLeakCertificate } from "./hybridRouter.js";
+import { buildZeroLeakCertificate, runLocalStructuralHeuristics } from "./hybridRouter.js";
 import type { AuditReport } from "./types.js";
 
 const SYNTHETIC_STRIPE_KEY = ["sk", "live", "51NxVeilDemo92KlmPqRsTuVwXyZ01928374"].join("_");
@@ -175,5 +175,24 @@ describe("VeilAI Local Privacy Vault — Zero-Leak Invariants", () => {
       updated.entities,
     );
     expect(answer).toBe("Project Helios requires IP carve-out approval from Claire Beaumont.");
+  });
+
+  it("shields all 4 demo scenarios (NDA, Medical Lab, Payslip, GitHub PR) with 100% zero-leak verification", () => {
+    for (const scenario of DEMO_SCENARIOS) {
+      const regexHits = runDeterministicRegexGuard(
+        scenario.content,
+        scenario.recommendedProfile,
+      );
+      const structuralHits = runLocalStructuralHeuristics(scenario.content);
+      const vault = buildVaultAndScrub(scenario.content, [], [
+        ...regexHits,
+        ...structuralHits,
+      ]);
+
+      expect(vault.zeroLeakVerified).toBe(true);
+      expect(vault.leakedMatches).toHaveLength(0);
+      expect(vault.entities.length).toBeGreaterThanOrEqual(7);
+      expect(vault.bytesShielded).toBeGreaterThan(50);
+    }
   });
 });

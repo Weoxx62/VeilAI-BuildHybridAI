@@ -20,7 +20,6 @@ import {
   DEEP_AUDIT_JSON_SCHEMA,
   LOCAL_TRIAGE_FIREBASE_SCHEMA,
   LOCAL_TRIAGE_JSON_SCHEMA,
-  ON_DEVICE_IMAGE_PII_JSON_SCHEMA,
 } from "./schemas.js";
 import type {
   AuditReport,
@@ -97,7 +96,7 @@ function buildCloudModelCascade(primary: string, fastFallback: string): string[]
   return unique;
 }
 
-function runLocalStructuralHeuristics(text: string): DetectedSpan[] {
+export function runLocalStructuralHeuristics(text: string): DetectedSpan[] {
   const hits: DetectedSpan[] = [];
   const labeledNameRegex =
     /(?:Patient Name|Ordering Physician|Prepared for|Author|represented by|and)\s*[:\-]?\s*((?:Dr\.\s+)?[A-Z][a-z]+(?:\s+[A-Z]['a-zA-Z]+){1,2})/g;
@@ -648,14 +647,14 @@ export async function runStage1LocalShield(params: {
   // Instant <5ms deterministic Regex Guard + structural heuristics pre-pass so UI lights up
   // immediately without ever losing entity highlights while Gemini Nano 4 runs locally.
   const initialRegexDetections =
-    !imagePart && workingText.trim().length > 0
+    workingText.trim().length > 0
       ? [
         ...runDeterministicRegexGuard(workingText, profile, allowedCategories),
         ...runLocalStructuralHeuristics(workingText),
       ]
       : [];
   const quickVault =
-    !imagePart && workingText.trim().length > 0
+    workingText.trim().length > 0
       ? buildVaultAndScrub(workingText, [], initialRegexDetections, previousToggleMap)
       : null;
 
@@ -708,6 +707,7 @@ export async function runStage1LocalShield(params: {
   } else {
     try {
       if (imagePart) {
+        // Avoid XGrammar responseConstraint compilation stall on multimodal Vision input
         const visionModel = getGenerativeModel(ai, {
           mode: InferenceMode.ONLY_ON_DEVICE,
           onDeviceParams: {
@@ -718,20 +718,17 @@ export async function runStage1LocalShield(params: {
               ],
               expectedOutputs: [{ type: "text", languages: ["en"] }],
             },
-            promptOptions: {
-              responseConstraint: ON_DEVICE_IMAGE_PII_JSON_SCHEMA,
-            },
           },
         });
 
         const visionPrompt = [
-          `Transcribe all visible text from this document image into "extractedText".`,
-          `Also list exact verbatim person/doctor names in "persons" and street addresses in "addresses". Return JSON only.`,
+          `Transcribe all visible text from this document image into "extractedText", and list person/doctor names in "persons" and street addresses in "addresses".`,
+          `Reply ONLY with compact JSON: {"extractedText":"...","persons":[],"addresses":[]}`,
         ].join("\n");
 
         const result = await withTimeout(
           (signal) => visionModel.generateContent([visionPrompt, imagePart], { signal }),
-          params.timeoutMs ?? 28_000,
+          params.timeoutMs ?? 15_000,
           "Gemini Nano 4 Vision",
         );
         const parsed = safeJsonParse<{

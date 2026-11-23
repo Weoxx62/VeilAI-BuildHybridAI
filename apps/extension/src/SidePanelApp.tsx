@@ -29,6 +29,7 @@ import {
   loadRemotePolicy,
   runDeterministicRegexGuard,
   runLocalQuickTriage,
+  runLocalStructuralHeuristics,
   runStage1LocalShield,
   runStage2CloudAudit,
   saveAnonymizedAudit,
@@ -77,7 +78,8 @@ function buildInstantLocalPreview(
   const startedAt = performance.now();
   const allowed = policy.profiles[profile].categories;
   const regexHits = runDeterministicRegexGuard(text, profile, allowed);
-  const vault = buildVaultAndScrub(text, [], regexHits);
+  const structuralHits = runLocalStructuralHeuristics(text);
+  const vault = buildVaultAndScrub(text, [], [...regexHits, ...structuralHits]);
   return {
     extractedText: text,
     scrubbedText: vault.scrubbedText,
@@ -243,7 +245,14 @@ export function SidePanelApp() {
   useEffect(() => {
     if (!services.isConfigured) return;
     void loadRemotePolicy(services.remoteConfig).then(setPolicy);
-    return subscribeAuthState(services.auth, setUser);
+    let autoGuestTried = false;
+    return subscribeAuthState(services.auth, (nextUser) => {
+      setUser(nextUser);
+      if (!nextUser && !autoGuestTried) {
+        autoGuestTried = true;
+        void signInAsGuest(services.auth).catch(() => undefined);
+      }
+    });
   }, [services]);
 
   useEffect(() => {

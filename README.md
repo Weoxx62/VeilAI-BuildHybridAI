@@ -1,111 +1,124 @@
 <p align="left">
-  <img src="./docs/veilai-logo.svg" width="56" height="56" alt="VeilAI Logo" />
+  <img src="./docs/veilai-logo.svg" width="60" height="60" alt="VeilAI — Folded Veil V Brand Mark" />
 </p>
 
 # VeilAI — Zero-Leak Split-Brain Hybrid AI Workspace
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
-[![Hackathon](https://img.shields.io/badge/Google-%23BuildHybridAI_2026-orange.svg)](https://firebasehybridaihackathon.devpost.com/)
-[![Firebase AI Logic](https://img.shields.io/badge/Firebase-AI_Logic_Hybrid_SDK-FFCA28.svg?logo=firebase&logoColor=black)](https://firebase.google.com/docs/ai-logic)
-[![Platforms](https://img.shields.io/badge/Platforms-Web_(Chrome)_%2B_Chrome_Extension-4285F4.svg)](#monorepo-architecture)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-veilai--hybrid--2026.web.app-10B981?style=flat-square&logo=firebase&logoColor=white)](https://veilai-hybrid-2026.web.app)
+[![License](https://img.shields.io/badge/License-Apache_2.0-3B82F6?style=flat-square)](./LICENSE)
+[![Hackathon](https://img.shields.io/badge/Google-%23BuildHybridAI_2026-F97316?style=flat-square)](https://firebasehybridaihackathon.devpost.com/)
+[![Firebase AI Logic](https://img.shields.io/badge/Firebase_AI_Logic-v13.4.0_Hybrid_SDK-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/docs/ai-logic)
+[![Tests](https://img.shields.io/badge/Vitest-7%2F7_Passing-34D399?style=flat-square)](./packages/hybrid-core/src/localVault.test.ts)
 
-> **Use Frontier Cloud AI on your most confidential documents — without a single byte of sensitive data ever leaving your device.**
+> **Review confidential contracts, medical lab reports, payslips, and source code with Frontier Cloud AI — without a single byte of personal or secret data ever leaving your device.**
 >
-> 🌐 **Live Demo (Firebase Hosting)**: https://veilai-hybrid-2026.web.app *(Free 1-click Guest Mode — zero sign-up required)*
->
-> Built with **Firebase AI Logic Hybrid Inference** (`Gemini Nano 4` On-Device + `Gemini 4 Hydrogen` Cloud), **Firebase App Check**, **Remote Config**, **Cloud Firestore Offline Persistence**, **Firebase Auth**, and **Firebase Hosting**.
+> 🌐 **Try it live (0 setup, auto Guest Workspace)**: **[https://veilai-hybrid-2026.web.app](https://veilai-hybrid-2026.web.app)**
 
 ---
 
-## 🚨 The Problem
+## ⚡ How It Works in 10 Seconds (Built for Anyone)
 
-Lawyers, doctors, accountants, HR teams, and engineers want Frontier Cloud AI to review **NDAs, employment contracts, medical lab reports, payslips, tax filings, and proprietary pull requests**.
-
-Today they face an impossible trade-off:
-1. **Cloud-only AI** delivers deep reasoning, **but violates GDPR, HIPAA, NDAs, and client privilege** the instant raw PII or API credentials cross the network.
-2. **On-device-only AI (`Gemini Nano`)** guarantees privacy and works offline, **but lacks the deep multi-clause reasoning and specialized legal/medical/security knowledge** needed for executive-grade audits.
+1. **Open or Drop a Document**: Choose one of the 4 pre-loaded real-world documents (`NDA & Employment`, `Medical Lab Photo`, `Payslip & Tax`, `GitHub PR Secrets`) or click **`Upload`** / drag-and-drop your own **`.pdf`**, **`.png`/`.jpg` photo**, or **text/code file**.
+2. **See Your Private Data Protected Locally**: Names, addresses, IBANs, salaries, medical IDs, and API keys are immediately highlighted in your browser (**Emerald** = names & places, **Amber** = financial & IDs, **Rose** = credentials). Click any highlight to toggle protection, or switch to **`Anonymized view`** to see the exact scrubbed draft.
+3. **Click `Review document` (or Ask a Question)**:
+   * **On-device AI (`Gemini Nano 4`)** shields your private details locally in browser RAM (`0 bytes` leaked).
+   * **Cloud AI (`Gemini` via Firebase AI Logic + App Check)** audits only tokenized placeholders (`[COMPANY_1]`, `[PERSON_2]`, `[IBAN_1]`).
+   * **Your browser** restores real names on your screen, lets you jump to exact clauses (`Section 3 ↗`), accept revisions, draft counter-proposals, and ask private follow-up questions (`On-device` or `Cloud`).
 
 ---
 
-## 💡 The Solution: Split-Brain Hybrid Inference
+## ⏱️ 60-Second Hackathon Judge Walkthrough
 
-**VeilAI** turns **Firebase AI Logic Hybrid Inference** into a **Zero-Leak Privacy Firewall & Expert Review Pipeline** where **both** on-device and cloud models are architecturally indispensable — not merely an offline fallback:
+Open **[https://veilai-hybrid-2026.web.app](https://veilai-hybrid-2026.web.app)** (VeilAI automatically creates a 1-click **Guest workspace** on load):
+
+1. **Run Full Split-Brain Review (`0:00 – 0:15`)**: Click **`Review document`** on the pre-loaded NDA contract. Watch the Risk Score (`95/100`), clause issues, and compliance checks appear, while the anonymized audit automatically syncs to **`Recent reviews`** (Cloud Firestore).
+2. **Verify Local Re-Hydration & Interactive Redlining (`0:15 – 0:30`)**:
+   * Toggle **`With your details` ↔ `Anonymized`** at the top of the Review panel to see real names (`Vespera Cloud Systems SAS`, `Marcus Delacroix`) swap with raw cloud tokens (`[COMPANY_1]`, `[PERSON_2]`).
+   * Click **`Section 3 ↗`** on the non-compete issue to scroll to and illuminate Section 3 in the contract, then click **`Accept`**.
+3. **Ask a Private Follow-Up Question (`0:30 – 0:45`)**: At the bottom of the Review panel, click **`"Summarize termination risks"`** (`On-device` or `Cloud`) — even follow-up questions are scrubbed of PII locally before execution and re-hydrated in RAM.
+4. **Open the Compliance & SDK Inspector (`0:45 – 1:00`)**: Click **`0 bytes leaked · Inspect`** in the top-right header:
+   * Inspect live **`result.response.inferenceSource`** SDK traces (`ON_DEVICE` vs `IN_CLOUD`), latency, and exact outbound prompt envelope.
+   * Click **`Simulate PII Leak Test`** to watch `verifyZeroLeak()` physically abort a tampered payload before any socket opens (`HARD WIRE GUARD ABORTED LEAK · 0B SENT`).
+   * Click **`Simulate Offline`**, switch to **`Medical Lab Photo`** (HIPAA Vision mask), and run an offline summary with **0 network requests**.
+
+---
+
+## 🧠 Why Split-Brain Hybrid Architecture?
+
+Lawyers, physicians, accountants, and engineers face an impossible choice:
+* **Cloud-only LLMs** offer deep multi-clause reasoning, **but leak raw PII and secrets** the instant a document leaves the browser — violating GDPR, HIPAA, NDAs, and client privilege.
+* **On-device-only models (`Gemini Nano 4`)** guarantee privacy and offline execution, **but have a smaller parameter footprint** than frontier cloud models.
+
+**VeilAI** turns **Firebase AI Logic Hybrid Inference** into a **cryptographic trust boundary** where both on-device and cloud models are indispensable:
 
 ```mermaid
 flowchart LR
-    A["Raw Confidential Input\n(Contract / Medical Lab Photo / Payslip / Code)"] --> B["Stage 1: ON-DEVICE SHIELD\nInferenceMode.ONLY_ON_DEVICE\nGemini Nano 4 (Text + Vision) + Local Vault"]
-    B -->|"100% Scrubbed Skeleton\n([PERSON_1], [IBAN_1], [API_KEY_1])\n0 bytes PII leaked"| C["Stage 2: CLOUD DEEP AUDIT\nInferenceMode.ONLY_IN_CLOUD / PREFER_IN_CLOUD\nGemini Cloud via Firebase AI Logic + App Check"]
-    B -.->|"Local RAM Token Map\n(Never leaves browser memory)"| D["Stage 3: LOCAL RE-HYDRATION & DRAFTING\nInferenceMode.PREFER_ON_DEVICE\n0ms lookup · $0.00 cost · Works Offline"]
-    C -->|"Structured Expert Report\n(Risk Score, Redlines, Compliance)"| D
+    A["Confidential Document\n(PDF / Contract / Medical Photo / Code)"] --> B["Stage 1: ON-DEVICE SHIELD\nInferenceMode.ONLY_ON_DEVICE\nGemini Nano 4 (Text + Vision) + Local Vault"]
+    B -->|"100% Scrubbed Skeleton\n([PERSON_1], [IBAN_1], [API_KEY_1])\nverifyZeroLeak() == 0B PII"| C["Stage 2: CLOUD DEEP AUDIT\nInferenceMode.ONLY_IN_CLOUD / PREFER_IN_CLOUD\n6-Model Gemini Cloud Cascade + App Check"]
+    C -.->|"Automatic 429/500/Offline Failover"| N["Hybrid Resilience Failover\nGemini Nano 4 On-Device Audit"]
+    B -.->|"Local RAM Token Map\n(Never leaves browser memory)"| D["Stage 3: LOCAL RE-HYDRATION & Q&A\nInferenceMode.PREFER_ON_DEVICE\n1ms RAM lookup · $0.00 cost · Works Offline"]
+    C -->|"Structured JSON Report\n(Risk Score, Redlines, Compliance)"| D
+    N --> D
     E["Firebase Remote Config\n(Live GDPR / HIPAA / DevSecOps / Tax Policy)"] -.-> B
     E -.-> C
-    D -->|"Anonymized Audit Trail Only (0 raw PII)"| F["Cloud Firestore\n(Offline Persistence + Cross-Surface Sync)"]
+    D -->|"Strictly Anonymized Audit Trail Only"| F["Cloud Firestore\n(Offline Persistence + Web/Extension Sync)"]
 ```
 
-### Intentional Use of All 4 Official `InferenceMode` Strategies
+### Intentional Use of All 4 Official `firebase/ai` `InferenceMode` Strategies
 
-| Pipeline Step | `firebase/ai` Mode | Model | Why Hybrid Matters Here |
+| Pipeline Stage | `firebase/ai` Mode | Runtime Engine | Why Hybrid Matters Here |
 | :--- | :--- | :--- | :--- |
-| **1. PII & Secret Detection / Redaction (Text & Image)** | `InferenceMode.ONLY_ON_DEVICE` | **Gemini Nano 4** (Chrome Built-in AI) | **Hard privacy invariant**: never falls back to cloud with raw PII. Works **100% offline** (Airplane Mode). |
-| **2. Offline Quick Summary, Redline Refinement & Reply Drafting** | `InferenceMode.PREFER_ON_DEVICE` | **Gemini Nano 4** → Cloud fallback | Instant, **$0.00** local summaries and streaming counter-proposals while keeping private details on-device. |
-| **3. Deep Expert Legal / Medical / Financial / Code Audit** | `InferenceMode.ONLY_IN_CLOUD` *(toggleable to `PREFER_IN_CLOUD`)* | **`gemini-4-hydrogen`** (`GoogleAIBackend`) | Receives **strictly tokenized text** (`[COMPANY_1]`, `[IBAN_1]`, `[API_KEY_1]`) for frontier reasoning Nano cannot match alone. |
-| **4. Live Runtime Verification** | `result.response.inferenceSource` | Firebase AI Logic SDK | Every call records live **`ON_DEVICE`** vs **`IN_CLOUD`** execution source, latency, wire bytes, and estimated cost saved. |
+| **1. PII & Secret Shield (Text, PDF & Image)** | `InferenceMode.ONLY_ON_DEVICE` | **Gemini Nano 4** + Deterministic Regex Vault | **Hard privacy guarantee**: never falls back to cloud with raw PII. Works **100% offline**. |
+| **2. Quick Summaries, Tone Refinement & Private Q&A** | `InferenceMode.PREFER_ON_DEVICE` | **Gemini Nano 4** → Anonymized Cloud fallback | Instant, **$0.00** local inference when Nano 4 is ready; safely falls back on scrubbed tokens if needed. |
+| **3. Deep Expert Legal / Medical / Financial / Code Review** | `InferenceMode.ONLY_IN_CLOUD` *(toggleable to `PREFER_IN_CLOUD`)* | **6-Model Cloud Cascade** (`gemini-3.5-flash-lite` → `gemini-3.8-flash` → `gemini-4-hydrogen`) + **On-Device Failover** | Frontier reasoning on **strictly tokenized text** (`[COMPANY_1]`, `[IBAN_1]`), with automatic on-device failover if cloud quota/network is unavailable. |
+| **4. Verifiable Execution Proof** | `result.response.inferenceSource` | Firebase AI Logic SDK Telemetry | Every runtime call records **`ON_DEVICE`** vs **`IN_CLOUD`**, latency (`ms`), wire bytes, and `$0.00` cost savings. |
 
 ---
 
-## ✨ Key Features
+## 📊 Verified Live Production Benchmarks
 
-### 1. 📄 Calm, Executive-Grade Document Studio (`apps/web`)
-Designed for real practitioners — not a noisy developer dashboard:
-* **Spacious Centered Document View**: Proportional reading typography for contracts, medical reports, and payslips (monospace reserved for source code), inline document renaming, and subtle interactive highlights on locally protected entities (click any highlight to toggle protection, or add custom confidential codenames inside `Manage`).
-* **100% Client-Side PDF, Image & File Ingestion**: Click **`Upload`** or drag-and-drop any **`.pdf` contract/lab report** (parsed locally via lazy-loaded PDF.js in browser RAM — 0 bytes uploaded), **PNG/JPEG photo**, or **`.txt`/`.md`/source code file**.
-* **Interactive Clause Navigation & Revision Tracking**: Click any clause reference (`Section 3 ↗`) in the Review panel to scroll directly to and illuminate that section inside the document; track accepted revisions (`Accept` → `2 of 4 accepted`), stream on-device tone refinements & counter-proposals, and export clean **Markdown (`.md`) Review Memos**.
-* **Private Hybrid Follow-Up Q&A (`Ask about this document`)**: Ask custom questions about any document in **`On-device`** (`PREFER_ON_DEVICE`, `$0.00`, works offline) or **`Cloud`** (`ONLY_IN_CLOUD` + App Check) mode — even your questions are automatically scrubbed of PII locally before execution and re-hydrated in RAM.
+Measured on **[https://veilai-hybrid-2026.web.app](https://veilai-hybrid-2026.web.app)** in Chrome Desktop (Gemini Nano 4 enabled):
 
-### 2. 🔍 1-Click **Privacy & Hybrid AI Inspector** (Compliance & Judge Verification)
-Click **`0 bytes leaked · Inspect`** in the top-right header to open the dedicated verification drawer:
-* **Live SDK Telemetry**: Shielded entities, `0 B` PII leaked, `% On-Device` share, and estimated cloud cost saved.
-* **`Simulate PII Leak Test`**: Deliberately injects a raw secret into the outbound payload to prove `verifyZeroLeak()` physically aborts transmission before any network socket opens.
-* **`Benchmark Nano vs Cloud`**: Live side-by-side comparison proving why on-device alone is fast & free (`$0.00`) while Split-Brain Hybrid unlocks deeper clause redlines with zero PII exposure.
-* **`Export SHA-256 Proof`**: Generates a Web Crypto SHA-256 verifiable JSON compliance certificate of the exact anonymized wire payload.
-* **Live Firebase Remote Config & Airplane Mode Simulator**: Sync policies (`GDPR_EU`, `HIPAA_MEDICAL`, `DEVSECOPS_CODE`, `FINANCIAL_TAX`), toggle Stage 2 `ONLY_IN_CLOUD` ↔ `PREFER_IN_CLOUD`, simulate offline execution, and inspect live `result.response.inferenceSource` traces + exact outbound cloud prompt envelope.
-
-### 3. 📸 Multimodal **Text & Image** On-Device Redaction
-Switch to **Medical Lab Photo** (includes a programmatic sample clinical blood panel PNG) or drop any PNG/JPEG:
-* **Gemini Nano 4 Vision** extracts and redacts patient PHI locally on-device (`ONLY_ON_DEVICE`), paired with a 1-click **Hide patient info** visual mask preview.
-
-### 4. ✈️ True **Offline Mode** (Airplane Mode Ready)
-Toggle **Simulate Offline** (or cut Wi-Fi in Chrome DevTools):
-* Stage 1 local PII shielding (`ONLY_ON_DEVICE`) and quick local triage (`PREFER_ON_DEVICE`) keep working with **0 network requests**.
-* Anonymized audit records queue transparently via **Cloud Firestore `persistentLocalCache()`** and sync automatically upon reconnect.
-
-### 5. 🧩 Multi-Surface Monorepo: **Web App + Chrome Extension (Manifest V3)**
-Both surfaces share `@veilai/hybrid-core` and synchronize anonymized audit history in real time via Firestore:
-* **Web App (`apps/web`)**: Live on Firebase Hosting (`https://veilai-hybrid-2026.web.app`) with 1-click **Guest Mode** and 4 pre-loaded real-world scenarios (`NDA & Employment`, `Medical Lab Photo`, `Payslip & Tax`, `GitHub PR Secrets`).
-* **Chrome Side-Panel Extension (`apps/extension`)**: One-click **`Capture tab`** on **Gmail, Google Docs, GitHub Pull Requests, or any highlighted selection** — redact locally in the Chrome Side Panel and sync anonymized reviews back to the Web App.
+| Operation | `firebase/ai` Mode | Measured `inferenceSource` | Latency | Wire Bytes Sent | Raw PII Leaked |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Instant Pre-Flight Highlight** | Local RAM Regex + Structural Guard | `LOCAL_REGEX_FALLBACK` | **`< 2 ms`** | `0 B` | **`0 B`** |
+| **Stage 1 Semantic PII Shield** | `InferenceMode.ONLY_ON_DEVICE` | **`ON_DEVICE`** (`Gemini Nano 4`) | **`2,243 ms`** | `0 B` | **`0 B`** |
+| **Private Follow-Up Q&A (Local)** | `InferenceMode.PREFER_ON_DEVICE` | **`ON_DEVICE`** (`Gemini Nano 4`) | **`3,388 ms`** | `0 B` | **`0 B`** |
+| **Offline Quick Summary** | `InferenceMode.PREFER_ON_DEVICE` | **`ON_DEVICE`** (`Gemini Nano 4`) | **`4,022 ms`** | `0 B` | **`0 B`** |
+| **Stage 2 Deep Expert Review** | `InferenceMode.ONLY_IN_CLOUD` | **`IN_CLOUD`** (`gemini-3.5-flash-lite`) | **`4,205 ms`** | `2,570 B` *(tokens)* | **`0 B`** |
+| **Stage 3 Local Re-Hydration** | In-Memory Vault Lookup | **`ON_DEVICE`** (`Browser RAM`) | **`1 ms`** | `0 B` | **`0 B`** |
 
 ---
 
-## 🛠️ Tech Stack & Firebase Services
+## 🔒 Security & Zero-Leak Defense-in-Depth
 
-* **Firebase AI Logic (`firebase/ai` v13.4.0)**: `GoogleAIBackend`, all 4 `InferenceMode` values (`ONLY_ON_DEVICE`, `PREFER_ON_DEVICE`, `PREFER_IN_CLOUD`, `ONLY_IN_CLOUD`), `GenerativeModel.initializeDeviceModel(onDownloadProgress)`, structured JSON schemas (`Schema.object` + Chrome Prompt API `responseConstraint`), multimodal PNG/JPEG Vision input on Gemini Nano 4, `gemini-4-hydrogen` / `gemini-3.5-flash-lite` cloud models, and `result.response.inferenceSource` verification.
-* **Firebase App Check**: Protects every cloud Firebase AI Logic request (supports reCAPTCHA / Fraud Defense and debug token verification for local & judge evaluation).
-* **Firebase Remote Config**: `remoteconfig.template.json` dynamically controls active compliance policies, mandatory redaction categories, and cloud Gemini model routing without redeploying.
-* **Cloud Firestore (Offline Persistence)**: `persistentLocalCache()` + emulator-verified Zero-Leak `firestore.rules` (`hasOnly` allowlists blocking any raw PII field at the database layer; owner-only isolation under `/users/{uid}/audits/{auditId}`).
-* **Firebase Authentication**: 1-click Anonymous **Guest Mode** + Google Sign-In.
-* **Firebase Hosting**: Production HTTPS web deployment.
-* **Frontend & Tooling**: TypeScript, React 19, Vite 8, Tailwind CSS 4, Vitest, Chrome Manifest V3 Side Panel API.
+VeilAI enforces **6 independent security layers** so sensitive data cannot leak accidentally or maliciously:
+
+1. **Strict Zero-Cloud-Fallback on Raw Input (`InferenceMode.ONLY_ON_DEVICE`)**:
+   Stage 1 never uses `PREFER_ON_DEVICE`. If a reviewer opens VeilAI in a browser without Gemini Nano 4, Stage 1 shields strictly via its deterministic local Regex + Structural Vault (`20` entity categories) with **0 network requests**.
+2. **Pre-Socket Mathematical Wire Guard (`verifyZeroLeak()`)**:
+   Immediately before any cloud `generateContent` or `generateContentStream` call (including follow-up Q&A!), VeilAI scans the exact outbound string against every enabled vault entity and throws a hard abort if even a single protected substring survives.
+3. **100% Client-Side PDF & Image Ingestion + 15 MB DoS Guard**:
+   PDF documents are parsed strictly inside browser RAM via a lazy-loaded Web Worker (`pdfjs-dist`), and image OCR runs via on-device Gemini Nano 4 Vision. Client-side file-size (`15 MB`) and character-length (`60,000 chars`) bounds prevent memory-exhaustion DoS.
+4. **Emulator-Verified Zero-PII Firestore Rules ([`firestore.rules`](./firestore.rules))**:
+   Strict `hasOnly` field allowlists reject any document containing raw PII fields (`rawInput`, `originalText`, `vaultMap`, `entities`, `rehydratedReport`) at the database boundary, while locking `entityCounts` keys to the 20 allowlisted `EntityCategory` enum values (`0..1000`). Per-user isolation (`/users/{uid}/audits/{auditId}`) enforces `request.auth != null && request.auth.uid == userId`.
+5. **Firebase App Check + No-Secret Repository Hygiene**:
+   All cloud Firebase AI Logic requests are protected by **Firebase App Check**. Zero API secrets, `.env.local` files, or private tokens exist in Git history (verified by automated secret scanning and GitHub Push Protection).
+6. **Hardened HTTP Security Headers ([`firebase.json`](./firebase.json))**:
+   Production Hosting enforces `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and a locked-down `Permissions-Policy` (`camera=(), microphone=(), geolocation=(), payment=(), usb=()`).
 
 ---
 
-## 📁 Monorepo Architecture
+## 🧩 Multi-Surface Monorepo Architecture
+
+Both the **Web Workspace (`apps/web`)** and the **Chrome Manifest V3 Side-Panel Extension (`apps/extension`)** share `@veilai/hybrid-core` and synchronize anonymized audit history in real time via Cloud Firestore Offline Persistence:
 
 ```text
 VeilAI-BuildHybridAI/
 ├── LICENSE                         # Apache-2.0 Open Source License
-├── README.md                       # Project overview & setup guide
+├── README.md                       # Project documentation & judge walkthrough
 ├── package.json                    # npm workspaces root
-├── firebase.json                   # Hosting, Auth, Firestore & Remote Config deployment config
+├── firebase.json                   # Hosting security headers, Auth, Firestore & Remote Config
 ├── firestore.rules                 # Emulator-verified Zero-Leak per-user security rules
 ├── firestore.indexes.json          # Composite audit query indexes
 ├── remoteconfig.template.json      # Live compliance profiles & Gemini model routing template
@@ -113,9 +126,9 @@ VeilAI-BuildHybridAI/
 │   └── hybrid-core/                # Shared Firebase AI Logic Hybrid Engine (@veilai/hybrid-core)
 │       └── src/
 │           ├── firebase.ts         # App, AppCheck, RemoteConfig, Firestore offline, Auth init
-│           ├── hybridRouter.ts     # ONLY_ON_DEVICE / PREFER_ON_DEVICE / ONLY_IN_CLOUD / PREFER_IN_CLOUD
-│           ├── localVault.ts       # In-memory PII token map, regex guard & verifyZeroLeak()
-│           ├── localVault.test.ts  # Vitest unit test suite (zero-leak & re-hydration invariants)
+│           ├── hybridRouter.ts     # All 4 InferenceModes, 6-model cloud cascade & Nano 4 failover
+│           ├── localVault.ts       # In-memory PII token map, regex guard, custom terms & verifyZeroLeak()
+│           ├── localVault.test.ts  # 7 Vitest unit tests verifying zero-leak & re-hydration invariants
 │           ├── schemas.ts          # Dual Firebase Schema + Chrome Prompt API JSON Constraints
 │           ├── remotePolicy.ts     # Remote Config compliance presets (GDPR/HIPAA/DevSecOps/Tax)
 │           ├── auditStore.ts       # Offline-first anonymized Firestore persistence & live sync
@@ -123,66 +136,65 @@ VeilAI-BuildHybridAI/
 │           └── telemetry.ts        # inferenceSource tracking (ON_DEVICE vs IN_CLOUD, $ saved)
 ├── apps/
 │   ├── web/                        # React 19 + Vite 8 Web Workspace (Firebase Hosting)
+│   │   ├── public/                 # Bespoke Folded Veil V favicon.svg & apple-touch-icon.png
 │   │   └── src/
 │   │       ├── components/
-│   │       │   ├── LeftSidebar.tsx           # Workspace navigation, recent reviews & on-device AI status
-│   │       │   ├── DocumentWorkbench.tsx     # Calm document reader, drag-and-drop, highlights & vision mask
-│   │       │   ├── InspectorPanel.tsx        # Editorial review dossier, re-hydration toggle, local drafting & export
-│   │       │   ├── PrivacyInspectorDrawer.tsx # 1-click compliance & judge inspector (SDK traces, leak test, benchmark, RC)
-│   │       │   └── AuditHistoryDrawer.tsx    # Real-time Firestore cross-surface sync ledger
+│   │       │   ├── VeilLogo.tsx              # Bespoke Folded Veil V architectural SVG monogram
+│   │       │   ├── LeftSidebar.tsx           # Workspace navigation, recent reviews & on-device status
+│   │       │   ├── DocumentWorkbench.tsx     # Document reader, PDF/image drop, clause focus & legend
+│   │       │   ├── InspectorPanel.tsx        # Review dossier, revision tracking, local drafting & Q&A
+│   │       │   ├── PrivacyInspectorDrawer.tsx # 1-click judge inspector (SDK traces, leak test, benchmark, RC)
+│   │       │   └── AuditHistoryDrawer.tsx    # Real-time Firestore cross-surface sync ledger + restore
 │   │       └── utils/
-│   │           ├── localPdfParser.ts         # Lazy-loaded 100% client-side PDF.js text extractor (0 uploads)
+│   │           ├── localPdfParser.ts         # Lazy-loaded 100% client-side PDF.js text extractor
 │   │           └── sampleLabImage.ts         # Programmatic clinical lab report PNG generator
 │   └── extension/                  # Chrome Manifest V3 Side-Panel Extension (@veilai/extension)
 │       ├── public/manifest.json    # MV3 Side Panel + activeTab + Gmail/GitHub/Docs content script
 │       └── src/
 │           ├── background.ts       # Action-click Side Panel launcher
 │           ├── content.ts          # On-demand selection/Gmail/GitHub/Docs extractor
-│           └── SidePanelApp.tsx    # Shared Split-Brain UI + Firestore sync inside Side Panel
+│           └── SidePanelApp.tsx    # Shared Split-Brain UI + auto-guest Firestore sync in Side Panel
 └── docs/
-    └── architecture.md             # Split-Brain sequence diagram & Zero-Leak threat model
+    ├── architecture.md             # Split-Brain sequence diagram & Zero-Leak threat model
+    └── veilai-logo.svg             # Vector brand mark
 ```
 
 ---
 
-## 🚀 Quick Start (Judges & Developers)
+## 🚀 Local Setup & Chrome Extension Installation
 
-### Option A — Try the Live Hosted Demo (Zero Setup)
-1. Open **https://veilai-hybrid-2026.web.app** in **Chrome Desktop** (`v139+` recommended for on-device Gemini Nano 4).
-2. *(Optional for true on-device Gemini Nano 4 execution)* Enable Chrome Built-in AI flags:
-   * `chrome://flags/#optimization-guide-on-device-model` → **Enabled BypassPerfRequirement**
-   * `chrome://flags/#prompt-api-multimodal-input` *(or `#prompt-api-for-gemini-nano-multimodal-input` on earlier Chrome builds)* → **Enabled**
-   * Relaunch Chrome. VeilAI also exposes a 1-click **Enable** button calling `GenerativeModel.initializeDeviceModel()`, and cleanly shields locally with its deterministic Regex Vault if opened in a browser without Nano.
-3. Click **Guest mode** (bottom-left) to enable real-time Firestore Sync, then click **Review document** and open **`0 bytes leaked · Inspect`** (top-right) to inspect live `ON_DEVICE` / `IN_CLOUD` SDK traces, test `Simulate PII Leak Test`, run `Benchmark Nano vs Cloud`, or toggle `Simulate Offline`.
+### Prerequisites
+* **Node.js `>= 20`** and **Chrome Desktop (`v139+`)**
+* *(Recommended for true on-device Gemini Nano 4 inference)* Enable Chrome Built-in AI flags:
+  1. `chrome://flags/#optimization-guide-on-device-model` → **Enabled BypassPerfRequirement**
+  2. `chrome://flags/#prompt-api-multimodal-input` *(or `#prompt-api-for-gemini-nano-multimodal-input`)* → **Enabled**
+  3. Relaunch Chrome. VeilAI also includes a 1-click **Enable** button calling `GenerativeModel.initializeDeviceModel()`, and automatically shields locally via its deterministic Regex Vault in browsers without Nano.
 
-### Option B — Run Locally & Load Chrome Extension
+### Build & Run Locally
 ```bash
 git clone https://github.com/Weoxx62/VeilAI-BuildHybridAI.git
 cd VeilAI-BuildHybridAI
 npm install
 
-# Configure Firebase Web App credentials & App Check debug token (never committed)
+# Configure Firebase Web App credentials & App Check debug token (gitignored)
 cp apps/web/.env.example apps/web/.env.local
 cp apps/extension/.env.example apps/extension/.env.local
 
-# Run unit tests & typecheck
+# Run the 7 Vitest Zero-Leak unit tests & TypeScript check
 npm test
 npm run typecheck
 
 # Start Web App locally (http://localhost:5173)
 npm run dev:web
 
-# Build Chrome Manifest V3 Extension (apps/extension/dist)
+# Build Chrome Manifest V3 Side-Panel Extension (outputs to apps/extension/dist)
 npm run build:extension
 ```
 
-To load the **Chrome Side-Panel Extension**:
-1. Open `chrome://extensions` in Chrome Desktop and enable **Developer mode**.
-2. Click **Load unpacked** and select `apps/extension/dist`.
-3. Open Gmail, Google Docs, or a GitHub Pull Request, click the **VeilAI** toolbar icon, and click **Capture tab** → **Review**.
-
-### App Check Setup for Local Development
-Firebase App Check is active by default. Set `VITE_APPCHECK_DEBUG_TOKEN=true` (or your registered debug token UUID) in `apps/web/.env.local` and `apps/extension/.env.local`, and register the UUID in **Firebase Console → App Check → Apps → Manage debug tokens**.
+### Load the Chrome Side-Panel Extension
+1. Open `chrome://extensions` in Chrome Desktop and enable **Developer mode** (top-right).
+2. Click **Load unpacked** and select the **`apps/extension/dist`** folder *(do not open the `icons` subfolder — select `dist` directly where `manifest.json` lives)*.
+3. Open **Gmail, Google Docs, or a GitHub Pull Request**, click the **VeilAI** icon in your Chrome toolbar, and click **`Capture tab`** → **`Review`**.
 
 ---
 

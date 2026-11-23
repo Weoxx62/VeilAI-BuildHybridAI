@@ -50,7 +50,7 @@ export const DEFAULT_COMPLIANCE_PROFILES: Record<
   DEVSECOPS_CODE: {
     id: "DEVSECOPS_CODE",
     label: "DevSecOps & Secrets",
-    description: "Blocks live API keys, AWS creds, DB URIs, JWTs, private keys, and IPs.",
+    description: "Blocks live API keys, AWS creds, DB URIs, JWTs, private keys, IPs, and author names.",
     categories: [
       "API_KEY",
       "AWS_KEY",
@@ -60,6 +60,7 @@ export const DEFAULT_COMPLIANCE_PROFILES: Record<
       "EMAIL",
       "IP_ADDRESS",
       "PASSWORD",
+      "PERSON",
     ],
     minSeverity: "LOW",
   },

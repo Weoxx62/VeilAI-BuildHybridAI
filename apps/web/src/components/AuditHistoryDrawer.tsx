@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import {
+  ArrowUpRight,
   CheckCircle2,
   Clock,
   CloudOff,
@@ -15,6 +16,7 @@ interface AuditHistoryDrawerProps {
   open: boolean;
   onClose: () => void;
   records: Array<AnonymizedAuditRecord & { hasPendingWrites: boolean }>;
+  onRestoreRecord: (record: AnonymizedAuditRecord) => void;
   onDelete: (auditId: string) => void;
   isSignedIn: boolean;
   firebaseConfigured: boolean;
@@ -24,6 +26,7 @@ export function AuditHistoryDrawer({
   open,
   onClose,
   records,
+  onRestoreRecord,
   onDelete,
   isSignedIn,
   firebaseConfigured,
@@ -143,15 +146,28 @@ export function AuditHistoryDrawer({
                     <p className="line-clamp-2 text-[#8E8E96]">{rec.scrubbedPreview}</p>
                   </div>
 
-                  <div className="mt-2.5 flex items-center justify-between font-mono text-[10.5px] text-[#75757C]">
-                    <span>
+                  <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-[#75757C]">
+                    <span className="font-mono">
                       Risk <strong className="text-[#EAE9E5]">{rec.riskScore}/100</strong> ·{" "}
                       {rec.totalEntitiesRedacted} shielded
                     </span>
-                    <span className="inline-flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {new Date(rec.createdAt).toLocaleTimeString()}
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      <span className="inline-flex items-center gap-1 font-mono text-[10.5px]">
+                        <Clock className="h-3 w-3" />
+                        {new Date(rec.createdAt).toLocaleTimeString()}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onRestoreRecord(rec);
+                          onClose();
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md bg-white/[0.07] px-2 py-1 text-[11px] font-medium text-[#EAE9E5] transition hover:bg-white/[0.13]"
+                      >
+                        <span>Open</span>
+                        <ArrowUpRight className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

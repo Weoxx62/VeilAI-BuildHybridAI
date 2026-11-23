@@ -38,7 +38,7 @@
     },
     "compliance_profiles_json": {
       "defaultValue": {
-        "value": "{\"GDPR_EU\":{\"label\":\"GDPR EU Legal & HR\",\"categories\":[\"PERSON\",\"EMAIL\",\"PHONE\",\"IBAN\",\"ADDRESS\",\"SALARY\",\"TAX_ID\",\"COMPANY\"],\"minSeverity\":\"MEDIUM\"},\"HIPAA_MEDICAL\":{\"label\":\"HIPAA Medical & Labs\",\"categories\":[\"PERSON\",\"DOB\",\"MEDICAL_ID\",\"SSN\",\"PHONE\",\"EMAIL\",\"ADDRESS\",\"INSURANCE_ID\"],\"minSeverity\":\"LOW\"},\"DEVSECOPS_CODE\":{\"label\":\"DevSecOps & Secrets\",\"categories\":[\"API_KEY\",\"AWS_KEY\",\"JWT\",\"PRIVATE_KEY\",\"DB_URI\",\"EMAIL\",\"IP_ADDRESS\",\"PASSWORD\"],\"minSeverity\":\"LOW\"},\"FINANCIAL_TAX\":{\"label\":\"Financial & Tax Audit\",\"categories\":[\"PERSON\",\"IBAN\",\"TAX_ID\",\"SSN\",\"SALARY\",\"ACCOUNT_NUMBER\",\"COMPANY\",\"ADDRESS\"],\"minSeverity\":\"MEDIUM\"}}"
+        "value": "{\"GDPR_EU\":{\"label\":\"GDPR EU Legal & HR\",\"categories\":[\"PERSON\",\"EMAIL\",\"PHONE\",\"IBAN\",\"ADDRESS\",\"SALARY\",\"TAX_ID\",\"COMPANY\"],\"minSeverity\":\"MEDIUM\"},\"HIPAA_MEDICAL\":{\"label\":\"HIPAA Medical & Labs\",\"categories\":[\"PERSON\",\"DOB\",\"MEDICAL_ID\",\"SSN\",\"PHONE\",\"EMAIL\",\"ADDRESS\",\"INSURANCE_ID\"],\"minSeverity\":\"LOW\"},\"DEVSECOPS_CODE\":{\"label\":\"DevSecOps & Secrets\",\"categories\":[\"API_KEY\",\"AWS_KEY\",\"JWT\",\"PRIVATE_KEY\",\"DB_URI\",\"EMAIL\",\"IP_ADDRESS\",\"PASSWORD\",\"PERSON\"],\"minSeverity\":\"LOW\"},\"FINANCIAL_TAX\":{\"label\":\"Financial & Tax Audit\",\"categories\":[\"PERSON\",\"IBAN\",\"TAX_ID\",\"SSN\",\"SALARY\",\"ACCOUNT_NUMBER\",\"COMPANY\",\"ADDRESS\"],\"minSeverity\":\"MEDIUM\"}}"
       },
       "description": "JSON map of live enterprise redaction policies controlled remotely via Firebase Remote Config.",
       "valueType": "JSON"

@@ -31,10 +31,10 @@ const REGEX_RULES: RegexRule[] = [
     pattern: /\b(?:postgres(?:ql)?|mongodb(?:\+srv)?|mysql|redis):\/\/[^\s"'`]+:[^\s"'`@]+@[^\s"'`]+/gi,
     confidence: 0.99,
   },
-  // Stripe / OpenAI / Anthropic / GitHub / Google API Keys
+  // Stripe / OpenAI / Anthropic / GitHub / Google API & Webhook Keys
   {
     category: "API_KEY",
-    pattern: /\b(?:sk_live_[A-Za-z0-9]{12,}|rk_live_[A-Za-z0-9]{12,}|pk_live_[A-Za-z0-9]{12,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{25,}|sk-proj-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{12,})\b/g,
+    pattern: /\b(?:sk_live_[A-Za-z0-9]{12,}|rk_live_[A-Za-z0-9]{12,}|pk_live_[A-Za-z0-9]{12,}|whsec_[A-Za-z0-9_]{12,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{25,}|sk-proj-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{12,})\b/g,
     confidence: 0.99,
   },
   // AWS Access Key IDs & Secret Keys

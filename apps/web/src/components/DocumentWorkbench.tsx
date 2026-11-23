@@ -38,6 +38,7 @@ interface DocumentWorkbenchProps {
   onSelectImageFile: (file: File) => void;
   onUploadPdfFile: (file: File) => void;
   onDropTextFile: (fileName: string, content: string) => void;
+  onFileValidationError?: (message: string) => void;
   onGenerateSampleLabImage: () => void;
   redaction: RedactionResult | null;
   onToggleEntity: (token: string) => void;
@@ -196,6 +197,7 @@ export function DocumentWorkbench({
   onSelectImageFile,
   onUploadPdfFile,
   onDropTextFile,
+  onFileValidationError,
   onGenerateSampleLabImage,
   redaction,
   onToggleEntity,
@@ -262,6 +264,13 @@ export function DocumentWorkbench({
   };
 
   const handleIncomingFile = async (file: File) => {
+    const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15 MB client-side DoS guard
+    if (file.size > MAX_FILE_BYTES) {
+      onFileValidationError?.(
+        "This file is larger than 15 MB. Please upload a smaller PDF, image, or text excerpt.",
+      );
+      return;
+    }
     const lowerName = file.name.toLowerCase();
     if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
       onUploadPdfFile(file);
@@ -279,10 +288,14 @@ export function DocumentWorkbench({
         file.name,
       )
     ) {
-      const content = await file.text();
+      const content = (await file.text()).slice(0, 60_000);
       onDropTextFile(file.name, content);
       setViewMode("document");
+      return;
     }
+    onFileValidationError?.(
+      "Unsupported file format. Please upload a PDF, PNG/JPEG image, or text/code file.",
+    );
   };
 
   const handleDragOver = (e: DragEvent<HTMLElement>) => {
@@ -486,6 +499,22 @@ export function DocumentWorkbench({
                           : " Click any highlight to adjust."
                       }`}
               </p>
+              {viewMode === "document" && inputModality === "text" && enabledCount > 0 && (
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-[#8E8E96]">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400/75" />
+                    Names &amp; places
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-amber-300/80" />
+                    Financial &amp; IDs
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-rose-400/80" />
+                    Credentials &amp; keys
+                  </span>
+                </div>
+              )}
             </div>
 
             {viewMode === "anonymized" && redaction && (
@@ -607,6 +636,28 @@ export function DocumentWorkbench({
             </div>
           ) : viewMode === "edit" ? (
             <div className="rounded-xl border border-white/[0.08] bg-[#222226] p-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-3 text-[12px] text-[#8E8E96]">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.04] px-2.5 py-1 text-[11.5px] font-medium text-[#EAE9E5] transition hover:bg-white/[0.09]"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>Import PDF, photo, or text file</span>
+                  </button>
+                  {rawText.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onChangeRawText("")}
+                      className="rounded-lg px-2 py-1 text-[11.5px] text-[#9A9AA0] transition hover:bg-white/[0.05] hover:text-white"
+                    >
+                      Clear text
+                    </button>
+                  )}
+                </div>
+                <span>{rawText.length.toLocaleString()} chars · stays on this device</span>
+              </div>
               <textarea
                 id="veilai-source-document"
                 name="sourceDocument"

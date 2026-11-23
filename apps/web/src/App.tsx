@@ -18,6 +18,7 @@ import {
   runDeterministicRegexGuard,
   runLocalOnlyBenchmark,
   runLocalQuickTriage,
+  runLocalStructuralHeuristics,
   runStage1LocalShield,
   runStage2CloudAudit,
   saveAnonymizedAudit,
@@ -89,6 +90,20 @@ function defaultCustomCategoryForDomain(domain: DocumentDomain): EntityCategory 
   }
 }
 
+function humanizeError(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : fallback;
+  if (/auth\/(operation-not-allowed|configuration-not-found)/i.test(raw)) {
+    return "Google Sign-In is not enabled in Firebase Console yet. Switched you to a private Guest workspace automatically.";
+  }
+  if (/auth\/popup-closed-by-user/i.test(raw)) {
+    return "Sign-in window was closed before completing.";
+  }
+  if (/429|quota|high demand|500|503/i.test(raw)) {
+    return "Cloud AI service is experiencing high traffic. Try again or use On-device mode.";
+  }
+  return raw.replace(/^Firebase:\s*|^AI:\s*/i, "").slice(0, 220);
+}
+
 function buildInstantLocalPreview(
   text: string,
   profile: ComplianceProfileId,
@@ -97,43 +112,9 @@ function buildInstantLocalPreview(
   const startedAt = performance.now();
   const allowed = policy.profiles[profile].categories;
   const regexHits = runDeterministicRegexGuard(text, profile, allowed);
+  const structuralHits = runLocalStructuralHeuristics(text);
 
-  const semanticHits: Array<{
-    category: "PERSON" | "COMPANY";
-    original: string;
-    source: "regex-guard";
-    confidence: number;
-  }> = [];
-
-  const labeledNameRegex =
-    /(?:Patient Name|Ordering Physician|Prepared for|Author|represented by|and)\s*[:\-]?\s*((?:Dr\.\s+)?[A-Z][a-z]+(?:\s+[A-Z]['a-zA-Z]+){1,2})/g;
-  let m: RegExpExecArray | null;
-  while ((m = labeledNameRegex.exec(text)) !== null) {
-    const candidate = m[1].trim();
-    if (
-      candidate.length >= 5 &&
-      !/^(Agreement|Section|Company|Employee|Annual|Clinical)$/i.test(candidate)
-    ) {
-      semanticHits.push({
-        category: "PERSON",
-        original: candidate,
-        source: "regex-guard",
-        confidence: 0.86,
-      });
-    }
-  }
-  const companyRegex =
-    /\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,3}\s+(?:SAS|LLC|Inc\.?|Ltd\.?|GmbH|Corp\.?|Laboratory))\b/g;
-  while ((m = companyRegex.exec(text)) !== null) {
-    semanticHits.push({
-      category: "COMPANY",
-      original: m[1].trim(),
-      source: "regex-guard",
-      confidence: 0.88,
-    });
-  }
-
-  const vault = buildVaultAndScrub(text, [], [...regexHits, ...semanticHits]);
+  const vault = buildVaultAndScrub(text, [], [...regexHits, ...structuralHits]);
   const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
 
   return {
@@ -245,6 +226,7 @@ export function App() {
   const previewUrlRef = useRef<string | null>(null);
   const runIdRef = useRef(0);
   const qaRunIdRef = useRef(0);
+  const autoGuestAttemptedRef = useRef(false);
 
   useEffect(() => {
     if (!isRunningShield) {
@@ -280,7 +262,13 @@ export function App() {
 
   useEffect(() => {
     if (!services.isConfigured) return;
-    return subscribeAuthState(services.auth, setUser);
+    return subscribeAuthState(services.auth, (nextUser) => {
+      setUser(nextUser);
+      if (!nextUser && !autoGuestAttemptedRef.current) {
+        autoGuestAttemptedRef.current = true;
+        void signInAsGuest(services.auth).catch(() => undefined);
+      }
+    });
   }, [services]);
 
   useEffect(() => {
@@ -414,18 +402,20 @@ export function App() {
   };
 
   const handleChangeRawText = (text: string) => {
-    setRawText(text);
+    const bounded = text.slice(0, 60_000);
+    setRawText(bounded);
     setActiveScenarioId(null);
     setHighlightedClauseRef(null);
     setRedaction(
-      text.trim().length > 0
-        ? buildInstantLocalPreview(text, activeProfile, policy)
+      bounded.trim().length > 0
+        ? buildInstantLocalPreview(bounded, activeProfile, policy)
         : null,
     );
   };
 
   const handleGenerateSampleLabImage = async () => {
     const sample = await generateSampleMedicalLabPng();
+    const labScenario = DEMO_SCENARIOS.find((s) => s.id === "medical-lab");
     setImageFile(sample.file);
     setIsSampleLabImage(true);
     setManagedPreviewUrl(sample.previewUrl);
@@ -434,6 +424,10 @@ export function App() {
     setDocTitle("Clinical Blood Panel & Metabolic Lab Report");
     setDocDomain("medical");
     setActiveProfile("HIPAA_MEDICAL");
+    if (labScenario) {
+      setRawText(labScenario.content);
+      setRedaction(buildInstantLocalPreview(labScenario.content, "HIPAA_MEDICAL", policy));
+    }
   };
 
   const handleSelectImageFile = (file: File) => {
@@ -445,6 +439,8 @@ export function App() {
     setPdfMeta(null);
     setActiveScenarioId(null);
     setDocTitle(file.name);
+    setRawText("");
+    setRedaction(null);
   };
 
   const handleUploadPdfFile = async (file: File) => {
@@ -1009,10 +1005,39 @@ export function App() {
     try {
       await signInWithGoogle(services.auth);
     } catch (err) {
-      setErrorBanner(err instanceof Error ? err.message : "Google sign-in failed.");
+      const msg = err instanceof Error ? err.message : "";
+      if (/auth\/(operation-not-allowed|configuration-not-found)/i.test(msg)) {
+        try {
+          await signInAsGuest(services.auth);
+        } catch {
+          // Ignore guest fallback failure
+        }
+      }
+      setErrorBanner(humanizeError(err, "Google sign-in failed."));
     } finally {
       setAuthBusy(false);
     }
+  };
+
+  const handleRestoreRecord = (rec: AnonymizedAuditRecord) => {
+    const matchedScenario = DEMO_SCENARIOS.find((s) => s.title === rec.title);
+    if (matchedScenario) {
+      void handleSelectScenario(matchedScenario);
+      return;
+    }
+    runIdRef.current += 1;
+    resetAnalysisState();
+    setActiveScenarioId(null);
+    setInputModality("text");
+    setImageFile(null);
+    setIsSampleLabImage(false);
+    setManagedPreviewUrl(null);
+    setPdfMeta(null);
+    setDocTitle(rec.title);
+    setDocDomain(rec.domain);
+    setActiveProfile(rec.complianceProfile);
+    setRawText(rec.scrubbedPreview);
+    setRedaction(null);
   };
 
   const handleDeleteRecord = async (auditId: string) => {
@@ -1077,6 +1102,7 @@ export function App() {
             onSelectImageFile={handleSelectImageFile}
             onUploadPdfFile={handleUploadPdfFile}
             onDropTextFile={handleDropTextFile}
+            onFileValidationError={setErrorBanner}
             onGenerateSampleLabImage={handleGenerateSampleLabImage}
             redaction={redaction}
             onToggleEntity={handleToggleEntity}
@@ -1150,6 +1176,7 @@ export function App() {
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
         records={auditRecords}
+        onRestoreRecord={handleRestoreRecord}
         onDelete={handleDeleteRecord}
         isSignedIn={Boolean(user)}
         firebaseConfigured={services.isConfigured}
