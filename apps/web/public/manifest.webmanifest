@@ -1,0 +1,22 @@
+{
+  "name": "VeilAI — Zero-Leak Hybrid AI Workspace",
+  "short_name": "VeilAI",
+  "description": "Review confidential contracts, medical labs, payslips, and code with 0 bytes of PII leaked.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#161618",
+  "theme_color": "#161618",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

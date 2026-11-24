@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Wifi } from "lucide-react";
 import {
   accumulateTelemetry,
   addCustomVaultTerm,
@@ -13,6 +13,7 @@ import {
   DEFAULT_REMOTE_POLICY,
   deleteAnonymizedAudit,
   DEMO_SCENARIOS,
+  extractTextFromDocxBuffer,
   fileToInlineImagePart,
   loadRemotePolicy,
   runDeterministicRegexGuard,
@@ -53,6 +54,7 @@ import { DocumentWorkbench } from "./components/DocumentWorkbench";
 import { InspectorPanel } from "./components/InspectorPanel";
 import { AuditHistoryDrawer } from "./components/AuditHistoryDrawer";
 import { PrivacyInspectorDrawer } from "./components/PrivacyInspectorDrawer";
+import { VeilLogo } from "./components/VeilLogo";
 import { generateSampleMedicalLabPng } from "./utils/sampleLabImage";
 import { extractTextFromPdfLocally } from "./utils/localPdfParser";
 
@@ -183,12 +185,15 @@ export function App() {
   const [inputModality, setInputModality] = useState<"text" | "image">("text");
   const [rawText, setRawText] = useState(initialScenario.content);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [redactedImageOverride, setRedactedImageOverride] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [isSampleLabImage, setIsSampleLabImage] = useState(false);
   const [isParsingPdf, setIsParsingPdf] = useState(false);
   const [pdfMeta, setPdfMeta] = useState<{ pageCount: number; truncated: boolean } | null>(
     null,
   );
+  const [fileSourceNote, setFileSourceNote] = useState<string | null>(null);
+  const [mobilePane, setMobilePane] = useState<"workspace" | "document" | "review">("document");
   const [highlightedClauseRef, setHighlightedClauseRef] = useState<string | null>(null);
 
   // Pipeline State
@@ -311,6 +316,7 @@ export function App() {
     setQaMessages([]);
     setQaStreamingAnswer("");
     setHighlightedClauseRef(null);
+    setRedactedImageOverride(null);
     setOfflineQueued(false);
     setLeakTestResult(null);
     setErrorBanner(null);
@@ -365,6 +371,8 @@ export function App() {
     setDocDomain(scenario.domain);
     setActiveProfile(scenario.recommendedProfile);
     setPdfMeta(null);
+    setFileSourceNote(null);
+    setMobilePane("document");
     setRawText(scenario.content);
     setRedaction(
       buildInstantLocalPreview(scenario.content, scenario.recommendedProfile, policy),
@@ -400,6 +408,8 @@ export function App() {
     setDocDomain("general");
     setInputModality("text");
     setPdfMeta(null);
+    setFileSourceNote(null);
+    setMobilePane("document");
     setRawText("");
     setRedaction(null);
   };
@@ -440,6 +450,7 @@ export function App() {
     setManagedPreviewUrl(URL.createObjectURL(file));
     setInputModality("image");
     setPdfMeta(null);
+    setFileSourceNote(null);
     setActiveScenarioId(null);
     setDocTitle(file.name);
     setRawText("");
@@ -454,6 +465,26 @@ export function App() {
     setIsParsingPdf(true);
     try {
       const parsed = await extractTextFromPdfLocally(file);
+      if (parsed.scannedPageImageFile) {
+        const scannedFile = parsed.scannedPageImageFile;
+        setActiveScenarioId(null);
+        setInputModality("image");
+        setImageFile(scannedFile);
+        setIsSampleLabImage(false);
+        setManagedPreviewUrl(URL.createObjectURL(scannedFile));
+        setDocTitle(file.name.replace(/\.pdf$/i, ""));
+        const inferred = inferDomainAndProfile(file.name, "", activeProfile);
+        setDocDomain(inferred.domain);
+        setActiveProfile(inferred.profile);
+        setPdfMeta(null);
+        setFileSourceNote(
+          "Scanned PDF detected (0 text layer) — rendered page 1 locally for Vision AI.",
+        );
+        setRawText("");
+        setRedaction(null);
+        return;
+      }
+
       const { domain, profile } = inferDomainAndProfile(
         file.name,
         parsed.text,
@@ -468,6 +499,7 @@ export function App() {
       setDocDomain(domain);
       setActiveProfile(profile);
       setPdfMeta({ pageCount: parsed.pageCount, truncated: parsed.truncated });
+      setFileSourceNote(null);
       setRawText(parsed.text);
       setRedaction(buildInstantLocalPreview(parsed.text, profile, policy));
     } catch (err) {
@@ -475,6 +507,45 @@ export function App() {
         err instanceof Error
           ? err.message
           : "Could not read this PDF locally in the browser.",
+      );
+    } finally {
+      setIsParsingPdf(false);
+    }
+  };
+
+  const handleUploadDocxFile = async (file: File) => {
+    runIdRef.current += 1;
+    setIsRunningShield(false);
+    setIsRunningCloud(false);
+    resetAnalysisState();
+    setIsParsingPdf(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const parsed = await extractTextFromDocxBuffer(buffer);
+      const { domain, profile } = inferDomainAndProfile(
+        file.name,
+        parsed.text,
+        activeProfile,
+      );
+      setActiveScenarioId(null);
+      setInputModality("text");
+      setImageFile(null);
+      setIsSampleLabImage(false);
+      setManagedPreviewUrl(null);
+      setPdfMeta(null);
+      setDocTitle(file.name.replace(/\.docx$/i, ""));
+      setDocDomain(domain);
+      setActiveProfile(profile);
+      setFileSourceNote(
+        `Extracted locally from Word document (${parsed.paragraphCount} paragraphs).`,
+      );
+      setRawText(parsed.text);
+      setRedaction(buildInstantLocalPreview(parsed.text, profile, policy));
+    } catch (err) {
+      setErrorBanner(
+        err instanceof Error
+          ? err.message
+          : "Could not read this .docx file locally in the browser.",
       );
     } finally {
       setIsParsingPdf(false);
@@ -492,6 +563,7 @@ export function App() {
     setIsSampleLabImage(false);
     setManagedPreviewUrl(null);
     setPdfMeta(null);
+    setFileSourceNote(null);
     setDocTitle(fileName);
 
     const { domain, profile } = inferDomainAndProfile(fileName, content, activeProfile);
@@ -526,9 +598,10 @@ export function App() {
     setLeakTestResult(null);
     setIsRunningShield(true);
     try {
+      const activeImage = redactedImageOverride ?? imageFile;
       const imagePart =
-        inputModality === "image" && imageFile
-          ? await fileToInlineImagePart(imageFile, imageFile.type)
+        inputModality === "image" && activeImage
+          ? await fileToInlineImagePart(activeImage, activeImage.type)
           : undefined;
 
       const previousToggles = new Map<string, boolean>();
@@ -664,6 +737,7 @@ export function App() {
 
   const handleRunFullSplitBrain = useCallback(async () => {
     const currentRunId = ++runIdRef.current;
+    setMobilePane("review");
     setCloudReportAnonymized(null);
     setRehydratedReport(null);
     setLocalTriage(null);
@@ -818,6 +892,7 @@ export function App() {
       setInputModality("text");
     }
     setHighlightedClauseRef(clauseRef);
+    setMobilePane("document");
   };
 
   const handleTestLeakGuard = () => {
@@ -982,6 +1057,37 @@ export function App() {
     }
   };
 
+  const handleGenerateRevisedDraft = async (
+    accepted: Array<{ clauseRef: string; title: string; anonymizedRedline: string }>,
+    onChunk: (partial: string) => void,
+  ) => {
+    if (!redaction || accepted.length === 0) return;
+    setErrorBanner(null);
+    const changesBlock = accepted
+      .map(
+        (item, idx) =>
+          `${idx + 1}. [${item.clauseRef} — ${item.title}] Replace/remediate with: ${item.anonymizedRedline}`,
+      )
+      .join("\n");
+    try {
+      const { trace } = await streamLocalRewrite({
+        ai: services.ai,
+        scrubbedExcerpt: `${redaction.scrubbedText.slice(0, 4800)}\n\n--- ACCEPTED REVISIONS TO APPLY ---\n${changesBlock}`,
+        instruction:
+          "Apply ONLY the accepted revisions cleanly into the anonymized document text, keeping all unchanged clauses and all placeholder tokens ([PERSON_1], [COMPANY_1], [SALARY_1], [IBAN_1], etc.) intact. Output clean Markdown ready for signature/review.",
+        policy,
+        entities: redaction.entities,
+        onChunk,
+      });
+      setTraces((prev) => [...prev, trace]);
+      setTelemetry((prev) => accumulateTelemetry(prev, [trace], 0, 0, false));
+    } catch (err) {
+      setErrorBanner(
+        err instanceof Error ? `Revised draft: ${err.message}` : "Could not generate revised draft.",
+      );
+    }
+  };
+
   const handleGuestLogin = async () => {
     if (!services.isConfigured) {
       setErrorBanner("Configure apps/web/.env.local to enable Firebase Authentication.");
@@ -1050,7 +1156,43 @@ export function App() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[#161618] text-[#EAE9E5] lg:h-screen lg:flex-row lg:overflow-hidden">
+      {/* Compact Mobile / Split-Screen Navigation (< 1024px) */}
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#161618] px-4 lg:hidden">
+        <div className="flex items-center gap-2">
+          <VeilLogo size={20} />
+          <span className="text-[13.5px] font-semibold text-[#F4F3EF]">VeilAI</span>
+        </div>
+        <div className="inline-flex rounded-lg bg-white/[0.05] p-0.5 text-[11.5px]">
+          {(
+            [
+              ["workspace", "Workspace"],
+              ["document", "Document"],
+              [
+                "review",
+                rehydratedReport
+                  ? `Review (${rehydratedReport.findings.length})`
+                  : "Review",
+              ],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setMobilePane(id)}
+              className={`rounded-md px-2.5 py-1 font-medium transition ${
+                mobilePane === id
+                  ? "bg-[#2C2C31] text-[#F4F3EF]"
+                  : "text-[#9A9AA0] hover:text-[#EAE9E5]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <LeftSidebar
+        className={mobilePane === "workspace" ? "flex" : "hidden"}
         activeScenarioId={activeScenarioId}
         onSelectScenario={handleSelectScenario}
         onNewCustomDoc={handleNewCustomDoc}
@@ -1068,8 +1210,10 @@ export function App() {
         onSignOut={() => void signOutUser(services.auth)}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col xl:flex-row">
-        <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col lg:flex-row">
+        <div
+          className={`${mobilePane === "document" ? "flex" : "hidden"} min-w-0 flex-1 flex-col lg:flex`}
+        >
           {errorBanner && (
             <div className="flex items-center justify-between gap-3 border-b border-amber-400/25 bg-amber-400/[0.08] px-6 py-2.5 text-[12.5px] text-amber-200">
               <div className="flex items-center gap-2">
@@ -1083,6 +1227,33 @@ export function App() {
               >
                 Dismiss
               </button>
+            </div>
+          )}
+
+          {effectiveOnline && offlineQueued && !rehydratedReport && !isRunningCloud && redaction && (
+            <div className="flex items-center justify-between gap-3 border-b border-emerald-400/25 bg-emerald-400/[0.08] px-6 py-2 text-[12.5px] text-emerald-200">
+              <div className="flex items-center gap-2">
+                <Wifi className="h-4 w-4 shrink-0 text-emerald-400" />
+                <span>
+                  Back online — finish deep cloud review for your locally protected document?
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void executeStage2(redaction, ++runIdRef.current)}
+                  className="rounded-lg bg-emerald-400/20 px-2.5 py-1 text-[11.5px] font-medium text-emerald-100 hover:bg-emerald-400/30"
+                >
+                  Complete review
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOfflineQueued(false)}
+                  className="text-[11.5px] text-emerald-200/75 underline hover:text-emerald-100"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
 
@@ -1102,13 +1273,17 @@ export function App() {
             isSampleLabImage={isSampleLabImage}
             isParsingPdf={isParsingPdf}
             pdfMeta={pdfMeta}
+            fileSourceNote={fileSourceNote}
             onSelectImageFile={handleSelectImageFile}
             onUploadPdfFile={handleUploadPdfFile}
+            onUploadDocxFile={handleUploadDocxFile}
             onDropTextFile={handleDropTextFile}
             onFileValidationError={setErrorBanner}
             onGenerateSampleLabImage={handleGenerateSampleLabImage}
             redaction={redaction}
             onToggleEntity={handleToggleEntity}
+            onShieldSelectedText={handleAddCustomTerm}
+            onRedactedImageChange={setRedactedImageOverride}
             highlightedClauseRef={highlightedClauseRef}
             onClearHighlightedClause={() => setHighlightedClauseRef(null)}
             onOpenPrivacyInspector={() => setPrivacyDrawerOpen(true)}
@@ -1116,6 +1291,7 @@ export function App() {
         </div>
 
         <InspectorPanel
+          className={mobilePane === "review" ? "flex" : "hidden"}
           docTitle={docTitle}
           docDomain={docDomain}
           redaction={redaction}
@@ -1144,6 +1320,7 @@ export function App() {
           onAskQuestion={handleAskQuestion}
           onPolishRedlineLocally={handlePolishRedlineLocally}
           onDraftFullReplyLocally={handleDraftFullReplyLocally}
+          onGenerateRevisedDraft={handleGenerateRevisedDraft}
         />
       </div>
 

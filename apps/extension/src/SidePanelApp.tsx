@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { User } from "firebase/auth";
 import {
   Check,
@@ -10,8 +10,10 @@ import {
   FileSearch,
   Globe,
   Loader2,
+  Plus,
   Puzzle,
   RefreshCw,
+  Send,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -20,7 +22,9 @@ import {
   X,
 } from "lucide-react";
 import {
+  addCustomVaultTerm,
   applyVaultRedaction,
+  askDocumentHybrid,
   buildVaultAndScrub,
   checkChromeAICapability,
   DEFAULT_REMOTE_POLICY,
@@ -42,6 +46,7 @@ import {
   type ChromeAICapability,
   type ComplianceProfileId,
   type DocumentDomain,
+  type DocumentQaMessage,
   type EntityCategory,
   type LocalTriageResult,
   type PipelineStageTrace,
@@ -229,6 +234,12 @@ export function SidePanelApp() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [customTerm, setCustomTerm] = useState("");
+  const [qaMessages, setQaMessages] = useState<DocumentQaMessage[]>([]);
+  const [qaInput, setQaInput] = useState("");
+  const [qaPreferLocal, setQaPreferLocal] = useState(true);
+  const [isAskingQa, setIsAskingQa] = useState(false);
+  const [qaStreamingAnswer, setQaStreamingAnswer] = useState("");
 
   useEffect(() => {
     void checkChromeAICapability().then(setCapability);
@@ -241,6 +252,57 @@ export function SidePanelApp() {
       window.removeEventListener("offline", onOffline);
     };
   }, []);
+
+  // Load text sent via right-click context menu ("Shield & Review selection with VeilAI")
+  useEffect(() => {
+    const applyPendingSelection = (pending: unknown) => {
+      if (
+        !pending ||
+        typeof pending !== "object" ||
+        typeof (pending as { text?: unknown }).text !== "string"
+      ) {
+        return;
+      }
+      const p = pending as { text: string; title?: string; url?: string };
+      const text = p.text.trim();
+      if (!text) return;
+      const isCode = (p.url || "").includes("github.com");
+      const nextDomain: DocumentDomain = isCode ? "code" : "legal";
+      const nextProf: ComplianceProfileId = isCode ? "DEVSECOPS_CODE" : "GDPR_EU";
+      setDocDomain(nextDomain);
+      setActiveProfile(nextProf);
+      setRawText(text);
+      setSourceLabel(p.title || "Selected Web Text");
+      setRedaction(buildInstantLocalPreview(text, nextProf, policy));
+      setCloudReport(null);
+      setRehydratedReport(null);
+      setTriage(null);
+      setQaMessages([]);
+      setActiveTab("document");
+      setDocViewMode("protected");
+      setStatusMsg("Shielded right-click selection locally (0 bytes sent).");
+      void chrome.storage?.local.remove("veilaiPendingSelection");
+    };
+
+    chrome.storage?.local.get("veilaiPendingSelection", (data) => {
+      if (data?.veilaiPendingSelection) {
+        applyPendingSelection(data.veilaiPendingSelection);
+      }
+    });
+
+    const onStorageChange = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      areaName: string,
+    ) => {
+      if (areaName === "local" && changes.veilaiPendingSelection?.newValue) {
+        applyPendingSelection(changes.veilaiPendingSelection.newValue);
+      }
+    };
+    chrome.storage?.onChanged.addListener(onStorageChange);
+    return () => {
+      chrome.storage?.onChanged.removeListener(onStorageChange);
+    };
+  }, [policy]);
 
   useEffect(() => {
     if (!services.isConfigured) return;
@@ -492,6 +554,77 @@ export function SidePanelApp() {
     );
     const reapplied = applyVaultRedaction(redaction.extractedText, nextEntities);
     setRedaction({ ...redaction, entities: nextEntities, ...reapplied });
+  };
+
+  const handleAddCustomTerm = (e: FormEvent) => {
+    e.preventDefault();
+    if (!redaction) return;
+    const term = customTerm.trim();
+    if (term.length < 3) return;
+    const updated = addCustomVaultTerm(
+      redaction.extractedText,
+      redaction.entities,
+      term,
+      docDomain === "code" ? "PASSWORD" : "COMPANY",
+    );
+    if (!updated.added) return;
+    setCustomTerm("");
+    setRedaction({
+      ...redaction,
+      entities: updated.entities,
+      scrubbedText: updated.scrubbedText,
+      bytesShielded: updated.bytesShielded,
+      zeroLeakVerified: updated.zeroLeakVerified,
+      leakedMatches: updated.leakedMatches,
+    });
+  };
+
+  const handleAskQuestion = async (e: FormEvent) => {
+    e.preventDefault();
+    const question = qaInput.trim();
+    if (!question || isAskingQa || !redaction) return;
+    if (!qaPreferLocal && !services.isConfigured) {
+      setStatusMsg("Connect Firebase to ask via anonymized cloud.");
+      return;
+    }
+    setQaInput("");
+    setIsAskingQa(true);
+    setQaStreamingAnswer("");
+    setStatusMsg(null);
+    try {
+      const res = await askDocumentHybrid({
+        ai: services.ai,
+        question,
+        scrubbedText: redaction.scrubbedText,
+        domain: docDomain,
+        profile: activeProfile,
+        policy,
+        entities: redaction.entities,
+        preferLocal: isOnline ? qaPreferLocal : true,
+        allowCloudFallback: isOnline && services.isConfigured,
+        onChunk: (partial) => setQaStreamingAnswer(partial),
+      });
+      setQaMessages((prev) => [
+        ...prev,
+        {
+          id: `ext-qa-${Date.now()}`,
+          question,
+          scrubbedQuestion: res.scrubbedQuestion,
+          rehydratedAnswer: res.rehydratedAnswer,
+          anonymizedAnswer: res.anonymizedAnswer,
+          inferenceSource: res.trace.inferenceSource,
+          modelUsed: res.trace.modelUsed,
+          latencyMs: res.trace.latencyMs,
+          createdAt: Date.now(),
+        },
+      ]);
+      setTraces((prev) => [...prev, res.trace]);
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "Could not answer question.");
+    } finally {
+      setIsAskingQa(false);
+      setQaStreamingAnswer("");
+    }
   };
 
   const handleCopy = async (key: string, val: string) => {
@@ -819,33 +952,54 @@ export function SidePanelApp() {
                 </div>
 
                 {showShieldedList && (
-                  <div className="mt-2.5 max-h-44 divide-y divide-white/[0.06] overflow-y-auto border-t border-white/[0.06] pt-1">
-                    {redaction.entities.map((e) => (
-                      <div
-                        key={e.token}
-                        className={`flex items-center justify-between gap-2 py-1.5 text-[11.5px] ${
-                          e.enabled ? "" : "opacity-45"
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-[#EAE9E5]">{e.original}</div>
-                          <div className="font-mono text-[10px] text-[#75757C]">
-                            {e.category.toLowerCase().replace("_", " ")} → {e.token}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleEntity(e.token)}
-                          className={`shrink-0 rounded px-2 py-0.5 text-[10.5px] font-medium ${
-                            e.enabled
-                              ? "bg-emerald-400/15 text-emerald-300"
-                              : "bg-white/[0.06] text-[#9A9AA0]"
+                  <div className="mt-2.5 space-y-2 border-t border-white/[0.06] pt-2">
+                    <div className="max-h-40 divide-y divide-white/[0.06] overflow-y-auto">
+                      {redaction.entities.map((e) => (
+                        <div
+                          key={e.token}
+                          className={`flex items-center justify-between gap-2 py-1.5 text-[11.5px] ${
+                            e.enabled ? "" : "opacity-45"
                           }`}
                         >
-                          {e.enabled ? "Protected" : "Visible"}
-                        </button>
-                      </div>
-                    ))}
+                          <div className="min-w-0">
+                            <div className="truncate text-[#EAE9E5]">{e.original}</div>
+                            <div className="font-mono text-[10px] text-[#75757C]">
+                              {e.category.toLowerCase().replace("_", " ")} → {e.token}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleEntity(e.token)}
+                            className={`shrink-0 rounded px-2 py-0.5 text-[10.5px] font-medium ${
+                              e.enabled
+                                ? "bg-emerald-400/15 text-emerald-300"
+                                : "bg-white/[0.06] text-[#9A9AA0]"
+                            }`}
+                          >
+                            {e.enabled ? "Protected" : "Visible"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <form onSubmit={(e) => handleAddCustomTerm(e)} className="flex items-center gap-1.5">
+                      <input
+                        id="veilai-ext-custom-term"
+                        name="extCustomTerm"
+                        type="text"
+                        value={customTerm}
+                        onChange={(e) => setCustomTerm(e.target.value)}
+                        placeholder="Hide custom word..."
+                        className="h-7 flex-1 rounded-lg border border-white/[0.08] bg-[#161618] px-2 text-[11px] text-[#EAE9E5] placeholder-[#6D6D75] focus:border-white/[0.2] focus:outline-none"
+                      />
+                      <button
+                        type="submit"
+                        disabled={customTerm.trim().length < 3}
+                        className="inline-flex h-7 items-center gap-1 rounded-lg bg-white/[0.08] px-2 text-[10.5px] font-medium text-[#EAE9E5] hover:bg-white/[0.14] disabled:opacity-40"
+                      >
+                        <Plus className="h-3 w-3" />
+                        <span>Hide</span>
+                      </button>
+                    </form>
                   </div>
                 )}
               </div>
@@ -974,6 +1128,79 @@ export function SidePanelApp() {
                     </div>
                   </article>
                 ))}
+              </div>
+            )}
+
+            {/* Compact Private Document Q&A */}
+            {redaction && (
+              <div className="space-y-2.5 border-t border-white/[0.06] pt-4">
+                <div className="flex items-center justify-between text-[11px] text-[#8E8E96]">
+                  <span className="font-medium">Document Q&amp;A</span>
+                  <div className="inline-flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setQaPreferLocal(true)}
+                      className={qaPreferLocal ? "font-medium text-emerald-300" : "hover:text-white"}
+                    >
+                      On-device
+                    </button>
+                    <span>·</span>
+                    <button
+                      type="button"
+                      disabled={!isOnline}
+                      onClick={() => setQaPreferLocal(false)}
+                      className={!qaPreferLocal ? "font-medium text-sky-300" : "hover:text-white disabled:opacity-40"}
+                    >
+                      Cloud
+                    </button>
+                  </div>
+                </div>
+
+                {qaMessages.map((m) => (
+                  <div key={m.id} className="rounded-xl border border-white/[0.06] bg-[#202024] p-3">
+                    <div className="text-[12px] font-medium text-[#F4F3EF]">
+                      {reportView === "cloud-raw" ? m.scrubbedQuestion : m.question}
+                    </div>
+                    <div className="mt-1.5 whitespace-pre-wrap text-[12px] leading-relaxed text-[#D2D1CC]">
+                      {reportView === "cloud-raw" ? m.anonymizedAnswer : m.rehydratedAnswer}
+                    </div>
+                  </div>
+                ))}
+
+                {isAskingQa && (
+                  <div className="rounded-xl border border-white/[0.06] bg-[#202024] p-3 text-[11.5px] text-[#9A9AA0]">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin text-emerald-400" />
+                      <span>{qaPreferLocal ? "Thinking locally..." : "Asking anonymized cloud..."}</span>
+                    </div>
+                    {qaStreamingAnswer && (
+                      <div className="mt-1.5 whitespace-pre-wrap text-[#EAE9E5]">
+                        {qaStreamingAnswer}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <form onSubmit={(e) => void handleAskQuestion(e)} className="flex items-center gap-1.5">
+                  <input
+                    id="veilai-ext-qa-input"
+                    name="extQaInput"
+                    type="text"
+                    value={qaInput}
+                    onChange={(e) => setQaInput(e.target.value)}
+                    disabled={isAskingQa}
+                    placeholder="Ask privately about this tab..."
+                    className="h-8 flex-1 rounded-lg border border-white/[0.09] bg-[#202024] px-2.5 text-[12px] text-[#EAE9E5] placeholder-[#75757C] focus:border-white/[0.2] focus:outline-none disabled:opacity-50"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!qaInput.trim() || isAskingQa}
+                    aria-label="Send extension question"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F2F1EE] text-[#161618] hover:bg-white disabled:opacity-35"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                  </button>
+                </form>
               </div>
             )}
           </div>

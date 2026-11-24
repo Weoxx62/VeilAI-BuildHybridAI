@@ -35,13 +35,17 @@ interface DocumentWorkbenchProps {
   isSampleLabImage: boolean;
   isParsingPdf: boolean;
   pdfMeta: { pageCount: number; truncated: boolean } | null;
+  fileSourceNote: string | null;
   onSelectImageFile: (file: File) => void;
   onUploadPdfFile: (file: File) => void;
+  onUploadDocxFile: (file: File) => void;
   onDropTextFile: (fileName: string, content: string) => void;
   onFileValidationError?: (message: string) => void;
   onGenerateSampleLabImage: () => void;
   redaction: RedactionResult | null;
   onToggleEntity: (token: string) => void;
+  onShieldSelectedText: (term: string) => void;
+  onRedactedImageChange?: (redactedFile: File | null) => void;
   highlightedClauseRef: string | null;
   onClearHighlightedClause: () => void;
   onOpenPrivacyInspector: () => void;
@@ -194,13 +198,17 @@ export function DocumentWorkbench({
   isSampleLabImage,
   isParsingPdf,
   pdfMeta,
+  fileSourceNote,
   onSelectImageFile,
   onUploadPdfFile,
+  onUploadDocxFile,
   onDropTextFile,
   onFileValidationError,
   onGenerateSampleLabImage,
   redaction,
   onToggleEntity,
+  onShieldSelectedText,
+  onRedactedImageChange,
   highlightedClauseRef,
   onClearHighlightedClause,
   onOpenPrivacyInspector,
@@ -209,16 +217,79 @@ export function DocumentWorkbench({
     "document",
   );
   const [imageMaskPreview, setImageMaskPreview] = useState(true);
+  const [drawRedactMode, setDrawRedactMode] = useState(false);
+  const [customBoxes, setCustomBoxes] = useState<
+    Array<{ x: number; y: number; w: number; h: number }>
+  >([]);
+  const [draftBox, setDraftBox] = useState<{
+    startX: number;
+    startY: number;
+    curX: number;
+    curY: number;
+  } | null>(null);
+  const [selectedSnippet, setSelectedSnippet] = useState<string | null>(null);
   const [copiedAnon, setCopiedAnon] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(docTitle);
   const paragraphRefs = useRef<Array<HTMLDivElement | null>>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imgWrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setTitleDraft(docTitle);
   }, [docTitle]);
+
+  useEffect(() => {
+    setCustomBoxes([]);
+    setDraftBox(null);
+    setDrawRedactMode(false);
+    onRedactedImageChange?.(null);
+  }, [imagePreviewUrl, onRedactedImageChange]);
+
+  useEffect(() => {
+    setSelectedSnippet(null);
+  }, [rawText, viewMode, inputModality]);
+
+  useEffect(() => {
+    if (!imagePreviewUrl || customBoxes.length === 0) {
+      onRedactedImageChange?.(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#141417";
+      for (const box of customBoxes) {
+        ctx.fillRect(
+          Math.round(box.x * canvas.width),
+          Math.round(box.y * canvas.height),
+          Math.round(box.w * canvas.width),
+          Math.round(box.h * canvas.height),
+        );
+      }
+      canvas.toBlob((blob) => {
+        if (!cancelled && blob) {
+          onRedactedImageChange?.(
+            new File([blob], imageFileName || "redacted-document.png", {
+              type: "image/png",
+            }),
+          );
+        }
+      }, "image/png");
+    };
+    img.src = imagePreviewUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [customBoxes, imageFileName, imagePreviewUrl, onRedactedImageChange]);
 
   useEffect(() => {
     if (inputModality === "image" && viewMode === "edit") {
@@ -277,6 +348,15 @@ export function DocumentWorkbench({
       setViewMode("document");
       return;
     }
+    if (
+      lowerName.endsWith(".docx") ||
+      file.type ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ) {
+      onUploadDocxFile(file);
+      setViewMode("document");
+      return;
+    }
     if (file.type === "image/png" || file.type === "image/jpeg") {
       onSelectImageFile(file);
       setViewMode("document");
@@ -294,8 +374,33 @@ export function DocumentWorkbench({
       return;
     }
     onFileValidationError?.(
-      "Unsupported file format. Please upload a PDF, PNG/JPEG image, or text/code file.",
+      "Unsupported file format. Please upload a PDF, Word (.docx), PNG/JPEG image, or text/code file.",
     );
+  };
+
+  const handleTextSelectionCheck = () => {
+    if (viewMode !== "document" || inputModality !== "text") {
+      setSelectedSnippet(null);
+      return;
+    }
+    const rawSel = window.getSelection()?.toString().trim() ?? "";
+    if (rawSel.length < 3 || rawSel.length > 80 || /[\r\n]/.test(rawSel)) {
+      setSelectedSnippet(null);
+      return;
+    }
+    const alreadyShielded = redaction?.entities.some(
+      (e) => e.enabled && e.original.toLowerCase() === rawSel.toLowerCase(),
+    );
+    setSelectedSnippet(alreadyShielded ? null : rawSel);
+  };
+
+  const normalizedPointFromEvent = (clientX: number, clientY: number) => {
+    const rect = imgWrapRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    return {
+      x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
+    };
   };
 
   const handleDragOver = (e: DragEvent<HTMLElement>) => {
@@ -339,7 +444,7 @@ export function DocumentWorkbench({
         id="veilai-universal-upload"
         name="documentFile"
         type="file"
-        accept=".pdf,image/png,image/jpeg,.txt,.md,.csv,.json,.eml,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.yml,.yaml,.log"
+        accept=".pdf,.docx,image/png,image/jpeg,.txt,.md,.csv,.json,.eml,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.yml,.yaml,.log"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -352,7 +457,7 @@ export function DocumentWorkbench({
         <div className="pointer-events-none absolute inset-4 z-30 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400/50 bg-[#161618]/92 backdrop-blur-xs">
           <Upload className="h-7 w-7 text-emerald-400" />
           <p className="mt-2.5 text-[14px] font-medium text-[#F4F3EF]">
-            Drop a PDF, photo, or text document to protect locally
+            Drop a PDF, Word (.docx), photo, or text file to protect locally
           </p>
           <p className="mt-1 text-[12px] text-[#8E8E96]">
             Parsed 100% in browser memory — zero bytes uploaded to any server
@@ -492,11 +597,14 @@ export function DocumentWorkbench({
                 {viewMode === "anonymized"
                   ? "Exact anonymized draft prepared for external review — zero personal identifiers included."
                   : inputModality === "image"
-                    ? "Scanned locally on your device. Personal identifiers are hidden before review."
+                    ? fileSourceNote ||
+                      "Scanned locally on your device. Personal identifiers are hidden before review."
                     : `${enabledCount} private details highlighted and shielded locally.${
                         pdfMeta
                           ? ` Extracted locally from ${pdfMeta.pageCount} PDF page${pdfMeta.pageCount > 1 ? "s" : ""}${pdfMeta.truncated ? " (first 25 shown)" : ""}.`
-                          : " Click any highlight to adjust."
+                          : fileSourceNote
+                            ? ` ${fileSourceNote}`
+                            : " Click any highlight or select text to protect."
                       }`}
               </p>
               {viewMode === "document" && inputModality === "text" && enabledCount > 0 && (
@@ -533,22 +641,78 @@ export function DocumentWorkbench({
             )}
 
             {viewMode === "document" && inputModality === "image" && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {isSampleLabImage && (
+                  <button
+                    type="button"
+                    onClick={() => setImageMaskPreview((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-1.5 text-[12px] font-medium text-[#EAE9E5] transition hover:bg-white/[0.08]"
+                  >
+                    {imageMaskPreview ? (
+                      <Eye className="h-3.5 w-3.5" />
+                    ) : (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    )}
+                    <span>{imageMaskPreview ? "Show original" : "Hide patient info"}</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setImageMaskPreview((v) => !v)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-1.5 text-[12px] font-medium text-[#EAE9E5] transition hover:bg-white/[0.08]"
+                  onClick={() => setDrawRedactMode((v) => !v)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-medium transition ${
+                    drawRedactMode
+                      ? "border-emerald-400/45 bg-emerald-400/15 text-emerald-200"
+                      : "border-white/[0.1] bg-white/[0.04] text-[#EAE9E5] hover:bg-white/[0.08]"
+                  }`}
+                  title="Drag across any region on the image to permanently paint a local blackout box before Vision AI runs"
                 >
-                  {imageMaskPreview ? (
-                    <Eye className="h-3.5 w-3.5" />
-                  ) : (
-                    <EyeOff className="h-3.5 w-3.5" />
-                  )}
-                  <span>{imageMaskPreview ? "Show original" : "Hide patient info"}</span>
+                  <Lock className="h-3.5 w-3.5" />
+                  <span>{drawRedactMode ? "Drawing blackout..." : "Draw blackout"}</span>
                 </button>
+                {customBoxes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomBoxes([])}
+                    className="rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-[11.5px] text-[#9A9AA0] transition hover:text-white"
+                  >
+                    Clear ({customBoxes.length})
+                  </button>
+                )}
               </div>
             )}
           </div>
+
+          {/* Selection-to-Shield Quick Pill (Progressive Disclosure) */}
+          {selectedSnippet && viewMode === "document" && inputModality === "text" && (
+            <div className="sticky top-2 z-20 mb-4 flex items-center justify-between gap-3 rounded-xl border border-emerald-400/35 bg-[#191B1A]/95 px-3.5 py-2 text-[12px] shadow-lg backdrop-blur-xs">
+              <span className="inline-flex min-w-0 items-center gap-2 text-[#EAE9E5]">
+                <Lock className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                <span className="truncate">
+                  Protect &ldquo;<strong>{selectedSnippet}</strong>&rdquo; locally?
+                </span>
+              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onShieldSelectedText(selectedSnippet);
+                    window.getSelection()?.removeAllRanges();
+                    setSelectedSnippet(null);
+                  }}
+                  className="rounded-lg bg-emerald-400/20 px-2.5 py-1 text-[11.5px] font-medium text-emerald-200 transition hover:bg-emerald-400/30"
+                >
+                  Shield selection
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSnippet(null)}
+                  className="text-[11.5px] text-[#8E8E96] hover:text-white"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Subtle Clause Jump Indicator (only visible when user clicks a clause ref in Review) */}
           {highlightedClauseRef && viewMode === "document" && inputModality === "text" && (
@@ -571,18 +735,48 @@ export function DocumentWorkbench({
             <div className="space-y-4">
               {imagePreviewUrl && (
                 <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#222226] p-4">
-                  <div className="relative">
+                  <div
+                    ref={imgWrapRef}
+                    onPointerDown={(e) => {
+                      if (!drawRedactMode) return;
+                      const pt = normalizedPointFromEvent(e.clientX, e.clientY);
+                      if (!pt) return;
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      setDraftBox({ startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y });
+                    }}
+                    onPointerMove={(e) => {
+                      if (!drawRedactMode || !draftBox) return;
+                      const pt = normalizedPointFromEvent(e.clientX, e.clientY);
+                      if (!pt) return;
+                      setDraftBox({ ...draftBox, curX: pt.x, curY: pt.y });
+                    }}
+                    onPointerUp={() => {
+                      if (!draftBox) return;
+                      const x = Math.min(draftBox.startX, draftBox.curX);
+                      const y = Math.min(draftBox.startY, draftBox.curY);
+                      const w = Math.abs(draftBox.curX - draftBox.startX);
+                      const h = Math.abs(draftBox.curY - draftBox.startY);
+                      if (w > 0.02 && h > 0.02) {
+                        setCustomBoxes((prev) => [...prev, { x, y, w, h }]);
+                      }
+                      setDraftBox(null);
+                    }}
+                    className={`relative mx-auto w-fit select-none ${
+                      drawRedactMode ? "cursor-crosshair ring-1 ring-emerald-400/40" : ""
+                    }`}
+                  >
                     <img
                       src={imagePreviewUrl}
                       alt="Confidential document kept on your device"
+                      draggable={false}
                       className="mx-auto max-h-[540px] w-auto rounded-lg object-contain"
                     />
-                    {imageMaskPreview && (
+                    {isSampleLabImage && imageMaskPreview && (
                       <div
                         className="pointer-events-none absolute inset-x-0 flex items-center justify-center"
                         style={{
-                          top: isSampleLabImage ? "14%" : "10%",
-                          height: isSampleLabImage ? "19%" : "22%",
+                          top: "14%",
+                          height: "19%",
                         }}
                       >
                         <div className="mx-auto flex h-full w-[72%] items-center justify-center rounded-md bg-[#161618]/95 shadow-lg ring-1 ring-emerald-400/35">
@@ -593,7 +787,35 @@ export function DocumentWorkbench({
                         </div>
                       </div>
                     )}
+                    {customBoxes.map((box, idx) => (
+                      <div
+                        key={idx}
+                        className="pointer-events-none absolute rounded-sm bg-[#141417] ring-1 ring-emerald-400/50"
+                        style={{
+                          left: `${box.x * 100}%`,
+                          top: `${box.y * 100}%`,
+                          width: `${box.w * 100}%`,
+                          height: `${box.h * 100}%`,
+                        }}
+                      />
+                    ))}
+                    {draftBox && (
+                      <div
+                        className="pointer-events-none absolute rounded-sm border border-dashed border-emerald-300 bg-[#141417]/80"
+                        style={{
+                          left: `${Math.min(draftBox.startX, draftBox.curX) * 100}%`,
+                          top: `${Math.min(draftBox.startY, draftBox.curY) * 100}%`,
+                          width: `${Math.abs(draftBox.curX - draftBox.startX) * 100}%`,
+                          height: `${Math.abs(draftBox.curY - draftBox.startY) * 100}%`,
+                        }}
+                      />
+                    )}
                   </div>
+                  {drawRedactMode && (
+                    <p className="mt-2.5 text-center text-[11.5px] text-emerald-300/90">
+                      Drag across sensitive text on the image to burn a permanent local blackout mask before Vision AI runs.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -682,7 +904,11 @@ export function DocumentWorkbench({
               </div>
             </div>
           ) : (
-            <div className="rounded-xl border border-white/[0.07] bg-[#222226] p-7">
+            <div
+              onMouseUp={handleTextSelectionCheck}
+              onKeyUp={handleTextSelectionCheck}
+              className="rounded-xl border border-white/[0.07] bg-[#222226] p-7"
+            >
               {paragraphs.length > 0 ? (
                 <div
                   className={`space-y-4 leading-[1.85] text-[#EAE9E5] ${

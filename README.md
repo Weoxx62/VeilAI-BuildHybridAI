@@ -5,10 +5,11 @@
 # VeilAI — Zero-Leak Split-Brain Hybrid AI Workspace
 
 [![Live Demo](https://img.shields.io/badge/Live_Demo-veilai--hybrid--2026.web.app-10B981?style=flat-square&logo=firebase&logoColor=white)](https://veilai-hybrid-2026.web.app)
+[![CI](https://github.com/Weoxx62/VeilAI-BuildHybridAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Weoxx62/VeilAI-BuildHybridAI/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-3B82F6?style=flat-square)](./LICENSE)
 [![Hackathon](https://img.shields.io/badge/Google-%23BuildHybridAI_2026-F97316?style=flat-square)](https://firebasehybridaihackathon.devpost.com/)
 [![Firebase AI Logic](https://img.shields.io/badge/Firebase_AI_Logic-v13.4.0_Hybrid_SDK-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/docs/ai-logic)
-[![Tests](https://img.shields.io/badge/Vitest-8%2F8_Passing-34D399?style=flat-square)](./packages/hybrid-core/src/localVault.test.ts)
+[![Tests](https://img.shields.io/badge/Vitest-10%2F10_Passing-34D399?style=flat-square)](./packages/hybrid-core/src/localVault.test.ts)
 
 > **Review confidential contracts, medical lab reports, payslips, and source code with Frontier Cloud AI — without a single byte of personal or secret data ever leaving your device.**
 >
@@ -28,12 +29,18 @@
 
 ## ⚡ How It Works in 10 Seconds (Built for Anyone)
 
-1. **Open or Drop a Document**: Choose one of the 4 pre-loaded real-world documents (`NDA & Employment`, `Medical Lab Photo`, `Payslip & Tax`, `GitHub PR Secrets`) or click **`Upload`** / drag-and-drop your own **`.pdf`**, **`.png`/`.jpg` photo**, or **text/code file**.
-2. **See Your Private Data Protected Locally**: Names, addresses, IBANs, salaries, medical IDs, and API keys are immediately highlighted in your browser (**Emerald** = names & places, **Amber** = financial & IDs, **Rose** = credentials). Click any highlight to toggle protection, or switch to **`Anonymized view`** to see the exact scrubbed draft.
+1. **Open or Drop a Document**: Choose one of the 4 pre-loaded real-world documents (`NDA & Employment`, `Medical Lab Photo`, `Payslip & Tax`, `GitHub PR Secrets`) or click **`Upload`** / drag-and-drop your own **`.pdf`** (including **scanned PDFs** rendered locally for Vision AI), **Word `.docx`**, **`.png`/`.jpg` photo** (with interactive drag-to-redact blackout boxes), or **text/code file**.
+2. **See Your Private Data Protected Locally**: Names, addresses, IBANs, salaries, medical IDs, and API keys are immediately highlighted in your browser (**Emerald** = names & places, **Amber** = financial & IDs, **Rose** = credentials). Click any highlight to toggle protection, select any phrase to click **`Shield selection`**, or switch to **`Anonymized view`** to see the exact scrubbed draft.
 3. **Click `Review document` (or Ask a Question)**:
-   * **On-device AI (`Gemini Nano 4`)** shields your private details locally in browser RAM (`0 bytes` leaked).
+   * **On-device AI (`Gemini Nano 4`)** shields your private details locally in browser RAM (`0 bytes` leaked) — and the PWA Service Worker supports **true offline `F5` reload** + automatic reconnect resume.
    * **Cloud AI (`Gemini` via Firebase AI Logic + App Check)** audits only tokenized placeholders (`[COMPANY_1]`, `[PERSON_2]`, `[IBAN_1]`).
-   * **Your browser** restores real names on your screen, lets you jump to exact clauses (`Section 3 ↗`), accept revisions, draft counter-proposals, and ask private follow-up questions (`On-device` or `Cloud`).
+   * **Your browser** restores real names on your screen, lets you jump to exact clauses (`Section 3 ↗`), accept revisions & **`Generate revised draft`**, and ask private follow-up questions (`On-device` or `Cloud`).
+
+---
+
+### Chrome Side-Panel Extension (`apps/extension`)
+* **1-Click `Capture tab`** on Gmail, Google Docs, and GitHub Pull Requests, plus **Right-Click `"Shield & Review selection with VeilAI"`** across any website (`contextMenus`).
+* Includes **`Document Q&A`**, custom term shielding, and live **Cloud Firestore Offline Persistence** sync with the Web App.
 
 ---
 
@@ -190,7 +197,7 @@ npm install
 cp apps/web/.env.example apps/web/.env.local
 cp apps/extension/.env.example apps/extension/.env.local
 
-# Run the 8 Vitest Zero-Leak unit tests & TypeScript check
+# Run the 10 Vitest Zero-Leak unit tests & TypeScript check
 npm test
 npm run typecheck
 

@@ -14,6 +14,7 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1100,
     rollupOptions: {
       input: {
         sidepanel: path.resolve(import.meta.dirname, "sidepanel.html"),

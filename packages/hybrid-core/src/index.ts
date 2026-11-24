@@ -7,3 +7,4 @@ export * from "./hybridRouter.js";
 export * from "./auditStore.js";
 export * from "./telemetry.js";
 export * from "./scenarios.js";
+export * from "./docxExtract.js";

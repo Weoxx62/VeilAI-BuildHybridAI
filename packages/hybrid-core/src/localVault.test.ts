@@ -10,11 +10,8 @@ import {
 } from "./localVault.js";
 import { DEMO_SCENARIOS } from "./scenarios.js";
 import { computeLocalSharePercent, createInitialTelemetry } from "./telemetry.js";
-import {
-  buildDynamicAuditReportFromNanoTriage,
-  buildZeroLeakCertificate,
-  runLocalStructuralHeuristics,
-} from "./hybridRouter.js";
+import { buildZeroLeakCertificate, runLocalStructuralHeuristics, buildDynamicAuditReportFromNanoTriage } from "./hybridRouter.js";
+import { buildMinimalDocxBufferForTest, extractTextFromDocxBuffer } from "./docxExtract.js";
 import type { AuditReport } from "./types.js";
 
 const SYNTHETIC_STRIPE_KEY = ["sk", "live", "51NxVeilDemo92KlmPqRsTuVwXyZ01928374"].join("_");
@@ -229,5 +226,31 @@ describe("VeilAI Local Privacy Vault — Zero-Leak Invariants", () => {
     expect(serialized).not.toContain("198 days");
     expect(serialized).not.toContain("Delaware");
     expect(serialized).not.toContain("Cour de Cassation");
+  });
+
+  it("extracts paragraphs & XML entities from a real .docx buffer in RAM and shields IBAN/names with 0 leaked bytes", async () => {
+    const docxBuffer = buildMinimalDocxBufferForTest([
+      "MASTER SERVICES AGREEMENT — ACME & CO",
+      "Contractor Elena Rostova shall receive €92,000 EUR via IBAN FR76 3000 6000 0112 3456 7890 189.",
+    ]);
+    const extracted = await extractTextFromDocxBuffer(docxBuffer);
+    expect(extracted.paragraphCount).toBe(2);
+    expect(extracted.text).toContain("ACME & CO");
+    expect(extracted.text).toContain("FR76 3000 6000 0112 3456 7890 189");
+
+    const regexHits = runDeterministicRegexGuard(extracted.text, "GDPR_EU");
+    const vault = buildVaultAndScrub(
+      extracted.text,
+      [{ category: "PERSON", original: "Elena Rostova", source: "gemini-nano", confidence: 0.99 }],
+      regexHits,
+    );
+    expect(vault.zeroLeakVerified).toBe(true);
+    expect(vault.scrubbedText).not.toContain("Elena Rostova");
+    expect(vault.scrubbedText).not.toContain("FR76 3000 6000 0112 3456 7890 189");
+  });
+
+  it("rejects non-DOCX binary buffers with a clear error", async () => {
+    const bad = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]).buffer;
+    await expect(extractTextFromDocxBuffer(bad)).rejects.toThrow(/Invalid \.docx/i);
   });
 });

@@ -16,13 +16,14 @@ import {
   Wand2,
   WifiOff,
 } from "lucide-react";
-import type {
-  AuditReport,
-  DocumentDomain,
-  DocumentQaMessage,
-  LocalTriageResult,
-  RedactionResult,
-  VaultEntity,
+import {
+  applyVaultRedaction,
+  type AuditReport,
+  type DocumentDomain,
+  type DocumentQaMessage,
+  type LocalTriageResult,
+  type RedactionResult,
+  type VaultEntity,
 } from "@veilai/hybrid-core";
 
 interface InspectorPanelProps {
@@ -54,6 +55,11 @@ interface InspectorPanelProps {
     onChunk: (text: string) => void,
   ) => Promise<void>;
   onDraftFullReplyLocally: (onChunk: (text: string) => void) => Promise<void>;
+  onGenerateRevisedDraft: (
+    accepted: Array<{ clauseRef: string; title: string; anonymizedRedline: string }>,
+    onChunk: (text: string) => void,
+  ) => Promise<void>;
+  className?: string;
 }
 
 const TOKEN_REGEX = /(\[[A-Z_]+_\d+\])/g;
@@ -121,6 +127,8 @@ export function InspectorPanel({
   onAskQuestion,
   onPolishRedlineLocally,
   onDraftFullReplyLocally,
+  onGenerateRevisedDraft,
+  className = "",
 }: InspectorPanelProps) {
   const [reportViewMode, setReportViewMode] = useState<"rehydrated" | "cloud-raw">(
     "rehydrated",
@@ -133,12 +141,15 @@ export function InspectorPanel({
   const [polishedMap, setPolishedMap] = useState<Record<string, string>>({});
   const [draftingReply, setDraftingReply] = useState(false);
   const [draftedReply, setDraftedReply] = useState("");
+  const [generatingRevised, setGeneratingRevised] = useState(false);
+  const [revisedDraftText, setRevisedDraftText] = useState("");
   const [qaInput, setQaInput] = useState("");
   const [qaPreferLocal, setQaPreferLocal] = useState(true);
 
   useEffect(() => {
     if (!rehydratedReport) {
       setDraftedReply("");
+      setRevisedDraftText("");
       setPolishedMap({});
       setAcceptedIds({});
     }
@@ -182,6 +193,46 @@ export function InspectorPanel({
     } finally {
       setDraftingReply(false);
     }
+  };
+
+  const handleGenerateRevised = async () => {
+    if (!activeReport || !redaction || generatingRevised) return;
+    const accepted = activeReport.findings
+      .map((f, idx) => ({ f, idx }))
+      .filter(({ f }) => Boolean(acceptedIds[f.id]))
+      .map(({ f, idx }) => {
+        const polished = polishedMap[f.id];
+        const anonymizedRedline = polished
+          ? applyVaultRedaction(polished, redaction.entities).scrubbedText
+          : cloudReportAnonymized?.findings[idx]?.suggestedRedline ?? f.suggestedRedline;
+        return {
+          clauseRef: f.clauseRef,
+          title: f.title,
+          anonymizedRedline,
+        };
+      });
+    if (accepted.length === 0) return;
+
+    setGeneratingRevised(true);
+    setRevisedDraftText("");
+    try {
+      await onGenerateRevisedDraft(accepted, (partial) => {
+        setRevisedDraftText(partial);
+      });
+    } finally {
+      setGeneratingRevised(false);
+    }
+  };
+
+  const handleDownloadRevisedDraft = () => {
+    if (!revisedDraftText) return;
+    const blob = new Blob([revisedDraftText], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${docTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 42)}-revised-draft.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleAddCustomSubmit = (e: FormEvent) => {
@@ -253,7 +304,7 @@ export function InspectorPanel({
   };
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-t border-white/[0.06] bg-[#19191C] xl:h-screen xl:w-[428px] xl:border-t-0 xl:border-l">
+    <aside className={`w-full shrink-0 flex-col border-t border-white/[0.06] bg-[#19191C] lg:flex lg:h-screen lg:w-[390px] xl:w-[428px] lg:border-t-0 lg:border-l ${className}`}>
       {/* Calm Review Header */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/[0.06] px-6">
         <span className="text-[13.5px] font-semibold text-[#F4F3EF]">
@@ -534,9 +585,24 @@ export function InspectorPanel({
                     Key issues ({activeReport.findings.length})
                   </h2>
                   {acceptedCount > 0 && (
-                    <span className="text-emerald-300">
-                      {acceptedCount} of {activeReport.findings.length} accepted
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-emerald-300">
+                        {acceptedCount} of {activeReport.findings.length} accepted
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleGenerateRevised()}
+                        disabled={generatingRevised}
+                        className="inline-flex items-center gap-1 rounded-md border border-emerald-400/35 bg-emerald-400/15 px-2 py-0.5 text-[11px] font-medium text-emerald-200 transition hover:bg-emerald-400/25 disabled:opacity-50"
+                      >
+                        {generatingRevised ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3 w-3" />
+                        )}
+                        <span>{generatingRevised ? "Revising..." : "Generate revised draft"}</span>
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -654,6 +720,48 @@ export function InspectorPanel({
                     );
                   })}
                 </div>
+
+                {(generatingRevised || revisedDraftText) && (
+                  <div className="rounded-xl border border-emerald-400/25 bg-[#1B1D1C] p-4">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-emerald-300">
+                        {generatingRevised && <Loader2 className="h-3 w-3 animate-spin" />}
+                        <span>
+                          {generatingRevised
+                            ? "Applying accepted redlines locally..."
+                            : "Revised document ready (re-hydrated in RAM)"}
+                        </span>
+                      </span>
+                      {revisedDraftText && !generatingRevised && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleDownloadRevisedDraft}
+                            className="inline-flex items-center gap-1 text-[11px] text-emerald-200 hover:text-white"
+                          >
+                            <Download className="h-3 w-3" />
+                            <span>Export .md</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy("revised-draft", revisedDraftText)}
+                            className="inline-flex items-center gap-1 text-[11px] text-[#D2D1CC] hover:text-white"
+                          >
+                            {copiedId === "revised-draft" ? (
+                              <Check className="h-3 w-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                            <span>{copiedId === "revised-draft" ? "Copied" : "Copy"}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="max-h-60 overflow-y-auto whitespace-pre-wrap text-[12.5px] leading-relaxed text-[#EAE9E5]">
+                      {revisedDraftText}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Compliance Checks */}

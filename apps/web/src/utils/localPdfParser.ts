@@ -1,13 +1,18 @@
 /**
- * 100% Client-Side Local PDF Text Extractor (Zero Server Upload).
- * Dynamically imports `pdfjs-dist` only when the user actually uploads or drops a PDF,
- * keeping initial page load fast while giving legal, medical, and finance professionals
- * true local PDF ingestion in browser RAM.
+ * 100% Client-Side Local PDF Text & Scanned-Page Extractor (Zero Server Upload).
+ * Dynamically imports `pdfjs-dist` only when the user uploads or drops a PDF.
+ * If a PDF is a scanned image with < 30 extracted characters, automatically renders Page 1
+ * onto an offscreen canvas in browser RAM so Gemini Nano 4 Vision can review it.
  */
 export async function extractTextFromPdfLocally(
   file: File,
   maxPages = 25,
-): Promise<{ text: string; pageCount: number; truncated: boolean }> {
+): Promise<{
+  text: string;
+  pageCount: number;
+  truncated: boolean;
+  scannedPageImageFile?: File;
+}> {
   const [pdfjsLib, workerModule] = await Promise.all([
     import("pdfjs-dist"),
     import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
@@ -57,10 +62,37 @@ export async function extractTextFromPdfLocally(
   }
 
   const combined = pageBlocks.join("\n\n").trim();
-  if (!combined) {
-    throw new Error(
-      "This PDF appears to be a scanned image with no embedded text. Save or screenshot it as a PNG/JPEG to run local Gemini Nano 4 Vision OCR.",
+  if (combined.length < 30) {
+    // Fallback for scanned image-only PDFs: render Page 1 locally into a PNG File for Vision AI
+    const page1 = await pdf.getPage(1);
+    const viewport = page1.getViewport({ scale: 1.75 });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error(
+        "Unable to render scanned PDF page in browser canvas. Please upload a PNG/JPEG image.",
+      );
+    }
+    await page1.render({ canvasContext: ctx, viewport, canvas }).promise;
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/png"),
     );
+    if (!blob) {
+      throw new Error("Could not convert scanned PDF page to PNG image locally.");
+    }
+    const imageFile = new File(
+      [blob],
+      file.name.replace(/\.pdf$/i, "-scan-page1.png"),
+      { type: "image/png" },
+    );
+    return {
+      text: "",
+      pageCount: totalPages,
+      truncated: false,
+      scannedPageImageFile: imageFile,
+    };
   }
 
   return {

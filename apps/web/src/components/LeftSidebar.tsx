@@ -35,6 +35,7 @@ interface LeftSidebarProps {
   onGuestLogin: () => void;
   onGoogleLogin: () => void;
   onSignOut: () => void;
+  className?: string;
 }
 
 const SCENARIO_ICONS: Record<string, typeof FileText> = {
@@ -60,9 +61,10 @@ export function LeftSidebar({
   onGuestLogin,
   onGoogleLogin,
   onSignOut,
+  className = "",
 }: LeftSidebarProps) {
   return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-white/[0.06] bg-[#161618] lg:h-screen lg:w-[232px] lg:border-r lg:border-b-0">
+    <aside className={`w-full shrink-0 flex-col border-b border-white/[0.06] bg-[#161618] lg:flex lg:h-screen lg:w-[232px] lg:border-r lg:border-b-0 ${className}`}>
       {/* Brand */}
       <div className="flex h-14 items-center justify-between px-4">
         <div className="flex items-center gap-2.5">
