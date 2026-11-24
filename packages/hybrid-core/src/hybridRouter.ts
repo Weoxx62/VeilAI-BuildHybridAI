@@ -199,255 +199,82 @@ async function streamModelWithTimeout(params: {
 }
 
 /**
- * Synthesizes a full, clause-referenced structured AuditReport from on-device Gemini Nano 4
- * triage + deterministic document clause analysis whenever the cloud tier is offline or 429/500.
+ * Converts real on-device Gemini Nano 4 triage output (`quickSummary` + `topFlags`)
+ * into a structured `AuditReport` with zero hardcoded domain or demo text.
  */
-function buildOnDeviceStructuredAuditReport(params: {
-  domain: DocumentDomain;
-  profile: ComplianceProfileId;
-  nanoSummary?: string;
-  nanoFlags?: string[];
+export function buildDynamicAuditReportFromNanoTriage(params: {
+  triage: {
+    documentType?: string;
+    urgency?: string;
+    quickSummary?: string;
+    topFlags?: string[];
+  };
+  profileLabel: string;
+  shieldedCount: number;
 }): AuditReport {
-  const { domain, profile, nanoSummary, nanoFlags = [] } = params;
+  const { triage, profileLabel, shieldedCount } = params;
+  const urgency = String(triage.urgency || "MEDIUM").toUpperCase();
+  const riskLevel: AuditReport["riskLevel"] =
+    urgency === "HIGH" ? "HIGH" : urgency === "LOW" ? "LOW" : "MEDIUM";
+  const riskScore =
+    riskLevel === "HIGH" ? 82 : riskLevel === "MEDIUM" ? 56 : 26;
 
-  if (domain === "medical" || profile === "HIPAA_MEDICAL") {
+  const rawFlags = (triage.topFlags ?? [])
+    .map((f) => String(f || "").trim())
+    .filter((f) => f.length > 0);
+
+  const findings: AuditReport["findings"] = rawFlags.map((raw, idx) => {
+    const parts = raw
+      .split("::")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    let clauseRef = "Document";
+    let title = `Flagged Issue ${idx + 1}`;
+    let explanation = raw;
+    let suggestedRedline = "";
+
+    if (parts.length >= 4) {
+      [clauseRef, title, explanation] = parts;
+      suggestedRedline = parts.slice(3).join(" — ");
+    } else if (parts.length === 3) {
+      [clauseRef, title, explanation] = parts;
+    } else if (parts.length === 2) {
+      [title, explanation] = parts;
+    } else {
+      title = raw.length > 72 ? `${raw.slice(0, 69)}...` : raw;
+    }
+
     return {
-      riskScore: 78,
-      riskLevel: "HIGH",
-      executiveSummary:
-        nanoSummary ||
-        "Clinical panel for [PERSON_1] ordered by [PERSON_2] shows elevated glycemic (fasting glucose 138 mg/dL, HbA1c 6.9%), atherogenic lipid (LDL 174 mg/dL, triglycerides 245 mg/dL), hepatic (ALT 68 U/L), and thyroid (TSH 6.4 mIU/L) markers requiring prompt endocrinology follow-up.",
-      findings: [
-        {
-          id: "F-01",
-          severity: "CRITICAL",
-          title: "Diabetic-range HbA1c (6.9%) & Fasting Hyperglycemia",
-          clauseRef: "Comprehensive Metabolic Panel",
-          explanation:
-            "Fasting glucose (138 mg/dL) and HbA1c (6.9% >= 6.5% threshold) indicate early Type 2 diabetes / metabolic syndrome for [PERSON_1].",
-          suggestedRedline:
-            "Schedule 14-day endocrinology consult with [PERSON_2]; confirm repeat fasting glucose, HbA1c, and lifestyle/metformin evaluation.",
-        },
-        {
-          id: "F-02",
-          severity: "HIGH",
-          title: "Combined Dyslipidemia & Elevated Hepatic ALT",
-          clauseRef: "Lipid Panel",
-          explanation:
-            "LDL cholesterol (174 mg/dL), low HDL (39 mg/dL), triglycerides (245 mg/dL), and ALT (68 U/L) elevate cardiovascular and hepatic steatosis risk.",
-          suggestedRedline:
-            "Request hepatic ultrasound / MASLD assessment and statin or lipid-lowering therapy review with [PERSON_2].",
-        },
-        {
-          id: "F-03",
-          severity: "MEDIUM",
-          title: "Subclinical Hypothyroidism (TSH 6.4 mIU/L)",
-          clauseRef: "Lab Technician Note",
-          explanation:
-            "TSH of 6.4 mIU/L (reference 0.4–4.0) correlates with reported fatigue and can worsen LDL cholesterol.",
-          suggestedRedline:
-            "Order Free T4 and anti-TPO thyroid antibody screening at follow-up visit.",
-        },
-      ],
-      complianceChecks: [
-        {
-          rule: "HIPAA Safe Harbor PHI Redaction",
-          status: "PASS",
-          note: "Patient name [PERSON_1], MRN [MEDICAL_ID_1], DOB, and insurance ID stripped on-device.",
-        },
-        {
-          rule: "Clinical Actionability Triage",
-          status: "WARN",
-          note: "Multiple out-of-range biomarkers flagged for physician follow-up within 14 days.",
-        },
-      ],
-      actionChecklist: [
-        "Book endocrinology follow-up within 14 days",
-        "Request Free T4 + anti-TPO antibody add-on panel",
-      ],
+      id: `F-0${idx + 1}`,
+      severity:
+        idx === 0 && riskLevel === "HIGH"
+          ? "HIGH"
+          : riskLevel === "LOW"
+            ? "LOW"
+            : "MEDIUM",
+      title,
+      clauseRef,
+      explanation,
+      suggestedRedline,
     };
-  }
+  });
 
-  if (domain === "code" || profile === "DEVSECOPS_CODE") {
-    return {
-      riskScore: 96,
-      riskLevel: "CRITICAL",
-      executiveSummary:
-        nanoSummary ||
-        "Pull request authored by [PERSON_1] ([EMAIL_1]) contains hardcoded live Stripe/AWS credentials, a production PostgreSQL connection URI, a disabled webhook signature verification check, and a raw SQL injection vulnerability.",
-      findings: [
-        {
-          id: "F-01",
-          severity: "CRITICAL",
-          title: "Hardcoded Production Stripe, AWS & Database Secrets",
-          clauseRef: "STRIPE_SECRET / AWS_ACCESS_KEY_ID",
-          explanation:
-            "Live credentials ([API_KEY_1], [AWS_KEY_1], [DB_URI_1], [JWT_1]) are committed directly in source code and logged to console.",
-          suggestedRedline:
-            "Revoke [API_KEY_1] and [AWS_KEY_1] immediately; load secrets strictly via process.env / Secret Manager and remove console.log output.",
-        },
-        {
-          id: "F-02",
-          severity: "CRITICAL",
-          title: "Unparameterized SQL Injection in invoice.paid Handler",
-          clauseRef: "pool.query",
-          explanation:
-            "Direct template string interpolation of planTier and customerEmail into UPDATE accounts allows arbitrary SQL execution.",
-          suggestedRedline:
-            "Use parameterized queries: await pool.query('UPDATE accounts SET plan = $1, active = true WHERE email = $2', [planTier, customerEmail]);",
-        },
-        {
-          id: "F-03",
-          severity: "HIGH",
-          title: "Disabled Stripe Webhook Signature Verification & Leaked Admin JWT",
-          clauseRef: "handleStripeWebhook",
-          explanation:
-            "Skipping stripe.webhooks.constructEvent allows forged billing events, and returning adminToken: [JWT_1] exposes superadmin privileges.",
-          suggestedRedline:
-            "Enforce stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET) and return only { ok: true }.",
-        },
-      ],
-      complianceChecks: [
-        {
-          rule: "SOC2 / OWASP Secret Hygiene",
-          status: "FAIL",
-          note: "Hardcoded credentials detected in PR diff (shielded locally before audit).",
-        },
-        {
-          rule: "OWASP Top 10 A03 Injection",
-          status: "FAIL",
-          note: "Unsanitized SQL string interpolation in billing handler.",
-        },
-      ],
-      actionChecklist: [
-        "Block PR merge and rotate exposed credentials immediately",
-        "Replace interpolated SQL with parameterized $1, $2 query",
-      ],
-    };
-  }
-
-  if (domain === "financial" || profile === "FINANCIAL_TAX") {
-    return {
-      riskScore: 86,
-      riskLevel: "HIGH",
-      executiveSummary:
-        nanoSummary ||
-        "Compensation statement for [PERSON_1] ([SALARY_1] base, paid to [IBAN_1]) reveals 0% withholding on an [SALARY_2] RSU vesting event, a 198-day French tax-residency mismatch, an unpaid 4% 401(k) employer match, and Q1–Q2 1099 misclassification exposure.",
-      findings: [
-        {
-          id: "F-01",
-          severity: "CRITICAL",
-          title: "Zero Tax Withholding on RSU Vest & Dual-Residency Exposure",
-          clauseRef: "Compensation Breakdown",
-          explanation:
-            "198 days in France triggers French tax residency under the US-France treaty while 0% withholding was applied on the RSU vest.",
-          suggestedRedline:
-            "File French tax residency apportionment schedule and reserve estimated quarterly tax for [PERSON_1] to avoid underpayment penalties.",
-        },
-        {
-          id: "F-02",
-          severity: "HIGH",
-          title: "1099-NEC Contractor Misclassification & Missing URSSAF A1",
-          clauseRef: "Tax & Compliance Notes",
-          explanation:
-            "Requiring exclusive 45-hour schedules under 1099-NEC in Q1–Q2 before switching to W-2 creates retroactive payroll tax liability.",
-          suggestedRedline:
-            "Request employer indemnification for Q1–Q2 employer-side payroll/URSSAF contributions and obtain certificate of coverage.",
-        },
-        {
-          id: "F-03",
-          severity: "MEDIUM",
-          title: "Missing 4% 401(k) Match & 100% Gross Relocation Clawback",
-          clauseRef: "Employer 401(k) Match",
-          explanation:
-            "Payroll recorded $0.00 employer match against a contractual 4% match, and the relocation stipend demands 100% gross repayment for 36 months.",
-          suggestedRedline:
-            "Credit the contractual 4% match arrears to [PERSON_1] and pro-rate relocation clawback monthly over 12 months.",
-        },
-      ],
-      complianceChecks: [
-        {
-          rule: "GDPR / Financial PII Minimization",
-          status: "PASS",
-          note: "SSN [SSN_1], TIN [TAX_ID_1], and IBAN [IBAN_1] kept strictly on-device.",
-        },
-        {
-          rule: "Cross-Border Payroll Withholding Compliance",
-          status: "FAIL",
-          note: "0% RSU withholding and 1099-to-W2 reclassification require remediation.",
-        },
-      ],
-      actionChecklist: [
-        "Claim contractual 4% 401(k) employer match adjustment",
-        "Reconcile US-France split residency withholding before year-end",
-      ],
-    };
-  }
-
-  // Default: Legal / NDA & Employment / General contract analysis
   return {
-    riskScore: 92,
-    riskLevel: "CRITICAL",
-    executiveSummary:
-      nanoSummary ||
-      `This agreement between [COMPANY_1] and [PERSON_2] (compensation [SALARY_1] paid to [IBAN_1]) contains severe enforceability and employee-protection defects under French and EU labor law, including an unpaid 24-month worldwide non-compete, retroactive pre-employment IP seizure, and a waiver of French labor court jurisdiction.`,
-    findings: [
-      {
-        id: "F-01",
-        severity: "CRITICAL",
-        title: "Unpaid 24-Month Worldwide Non-Compete Clause",
-        clauseRef: "Section 3",
-        explanation:
-          nanoFlags[1] ||
-          "A 24-month worldwide ban across all cloud, AI, and SaaS businesses with zero financial indemnity (clause de non-concurrence non rémunérée) is void and unenforceable under mandatory French Cour de Cassation precedent.",
-        suggestedRedline:
-          "Limit non-compete for [PERSON_2] to 12 months within direct competing product lines in France/EU, conditioned on a monthly financial indemnity equal to 35% of [SALARY_1].",
-      },
-      {
-        id: "F-02",
-        severity: "HIGH",
-        title: "Retroactive Assignment of Pre-Employment & Personal-Equipment IP",
-        clauseRef: "Section 2",
-        explanation:
-          nanoFlags[0] ||
-          "Section 2 seizes inventions, open-source repositories, and side projects created by [PERSON_2] up to 12 months prior to employment or on personal equipment outside working hours.",
-        suggestedRedline:
-          "Restrict IP assignment strictly to works created by [PERSON_2] during employment hours using [COMPANY_1] resources or directly related to [COMPANY_1]'s core business, and attach a Prior Inventions exclusion schedule.",
-      },
-      {
-        id: "F-03",
-        severity: "CRITICAL",
-        title: "At-Will Termination Without Notice, Cliff Bonus Forfeiture & Delaware Arbitration",
-        clauseRef: "Section 4",
-        explanation:
-          nanoFlags[2] ||
-          "Immediate termination without notice/severance, a 6-month employee notice burden, forfeiture of the [SALARY_2] equity bonus upon termination without cause, and Delaware arbitration violate mandatory French Labor Code (Code du travail) protections.",
-        suggestedRedline:
-          "Apply reciprocal 3-month notice periods for both [COMPANY_1] and [PERSON_2], provide pro-rata vesting of the [SALARY_2] bonus upon termination without cause, and restore jurisdiction to competent French courts.",
-      },
-    ],
+    riskScore,
+    riskLevel,
+    executiveSummary: String(triage.quickSummary || "").trim(),
+    findings,
     complianceChecks: [
       {
-        rule: "GDPR Art. 5 Data Minimization & Local Shield",
+        rule: `${profileLabel} — Local Zero-Leak Shield`,
         status: "PASS",
-        note: "14 personal & financial identifiers ([PERSON_1], [PERSON_2], [IBAN_1], [SALARY_1]) stayed strictly in local RAM.",
-      },
-      {
-        rule: "French Labor Code Non-Compete Indemnity Requirement",
-        status: "FAIL",
-        note: "Section 3 omits mandatory financial compensation.",
-      },
-      {
-        rule: "EU Brussels I Recast / Mandatory Employment Jurisdiction",
-        status: "FAIL",
-        note: "Section 4 cannot waive employee access to home-country labor courts.",
+        note: `${shieldedCount} sensitive ${shieldedCount === 1 ? "entity" : "entities"} kept strictly in local browser RAM (0 bytes sent to cloud).`,
       },
     ],
-    actionChecklist: [
-      "Add Prior Inventions carve-out schedule to Section 2",
-      "Require 35% monthly financial indemnity or delete Section 3 non-compete",
-      "Restore French labor court jurisdiction and reciprocal 3-month notice in Section 4",
-    ],
+    actionChecklist: findings
+      .map((f) => f.suggestedRedline || f.title)
+      .filter(Boolean)
+      .slice(0, 4),
   };
 }
 
@@ -1130,10 +957,14 @@ export async function runStage2CloudAudit(params: {
 
   if (!parsed) {
     // Ultimate Hybrid AI Resilience: if ALL cloud models are experiencing a 429/500 outage,
-    // seamlessly execute on-device Gemini Nano 4 via the fast 4s triage schema + clause analyzer
-    // so the practitioner is NEVER stranded!
-    let nanoSummary: string | undefined;
-    let nanoFlags: string[] | undefined;
+    // execute real on-device Gemini Nano 4 via the fast triage schema and convert its
+    // live output dynamically into an AuditReport (zero hardcoded demo findings).
+    let triageParsed: {
+      documentType?: string;
+      urgency?: string;
+      quickSummary?: string;
+      topFlags?: string[];
+    } | null = null;
     const lm = getGlobalLanguageModel();
     let nanoAvail = "unavailable";
     if (lm) {
@@ -1162,8 +993,8 @@ export async function runStage2CloudAudit(params: {
           },
         });
         const localPrompt = [
-          `Review this anonymized ${domain} document. Keep all [TOKEN_N] placeholders unchanged.`,
-          `Return JSON with documentType, urgency (LOW/MEDIUM/HIGH), quickSummary (2 sentences), and topFlags (3 key risks).`,
+          `Review this anonymized ${domain} document under ${profileDef.label}. Keep all [TOKEN_N] placeholders unchanged.`,
+          `Return JSON with documentType, urgency (LOW/MEDIUM/HIGH), quickSummary (2 concise sentences grounded strictly in this document), and topFlags (up to 3 items formatted as "Clause or Section :: Short Risk Title :: Why this matters in this document :: Concrete suggested revision").`,
           ``,
           scrubbedText.slice(0, 3200),
         ].join("\n");
@@ -1172,30 +1003,36 @@ export async function runStage2CloudAudit(params: {
           14_000,
           "Gemini Nano 4 Hybrid Failover",
         );
-        const triageParsed = safeJsonParse<{
+        triageParsed = safeJsonParse<{
+          documentType?: string;
+          urgency?: string;
           quickSummary?: string;
           topFlags?: string[];
         }>(localRes.response.text());
-        if (triageParsed?.quickSummary) nanoSummary = triageParsed.quickSummary;
-        if (Array.isArray(triageParsed?.topFlags)) nanoFlags = triageParsed.topFlags;
       } catch {
-        // Proceed with deterministic clause synthesis
+        triageParsed = null;
       }
     }
 
-    parsed = buildOnDeviceStructuredAuditReport({
-      domain,
-      profile,
-      nanoSummary,
-      nanoFlags,
-    });
-    chosenModel =
-      nanoAvail === "available"
-        ? "Gemini Nano 4 (Hybrid Cloud-Quota Failover)"
-        : "On-Device Clause Analyzer (Offline Failover)";
-    inferenceSource = "ON_DEVICE";
-    failoverNote =
-      " Cloud free-tier quota/500 reached; seamlessly completed review on-device (0B sent to cloud).";
+    if (
+      triageParsed &&
+      (triageParsed.quickSummary ||
+        (Array.isArray(triageParsed.topFlags) && triageParsed.topFlags.length > 0))
+    ) {
+      parsed = buildDynamicAuditReportFromNanoTriage({
+        triage: triageParsed,
+        profileLabel: profileDef.label,
+        shieldedCount: entities.filter((e) => e.enabled).length,
+      });
+      chosenModel = "Gemini Nano 4 (On-Device Failover)";
+      inferenceSource = "ON_DEVICE";
+      failoverNote =
+        " Cloud unavailable; completed dynamic review on-device via Gemini Nano 4 (0B sent to cloud).";
+    } else {
+      throw new Error(
+        "Local Shield complete (0B leaked) — reconnect for Deep Cloud Review, or enable Chrome Gemini Nano 4 for offline on-device review.",
+      );
+    }
   }
 
   const cloudLatencyMs = Math.max(1, Math.round(performance.now() - startedAt));
@@ -1699,22 +1536,9 @@ export async function askDocumentHybrid(params: {
       }
     }
     if (!succeeded) {
-      // Deterministic local advisory fallback so Q&A never surfaces a 429/500 dead-end
-      const qLower = scrubbedQuestion.toLowerCase();
-      if (qLower.includes("non-compete") || qLower.includes("enforceable")) {
-        anonymizedAnswer =
-          "Under mandatory French Cour de Cassation precedent, the 24-month worldwide non-compete in Section 3 is void and unenforceable as written because it lacks a financial non-compete indemnity (contrepartie financière) and imposes an overbroad global scope on [PERSON_2]. To make it valid, [COMPANY_1] must limit the scope/duration (typically 12 months in France/EU) and pay a monthly indemnity of 30%–50% of [SALARY_1].";
-      } else if (qLower.includes("termination") || qLower.includes("notice")) {
-        anonymizedAnswer =
-          "Section 4 creates severe asymmetry: [COMPANY_1] claims immediate termination without notice or severance for 'strategic realignment' and forfeits the [SALARY_2] equity bonus, while requiring 6 months' notice from [PERSON_2] and mandating Delaware arbitration. Under French labor law, employees cannot waive labor court jurisdiction or mandatory statutory notice/severance.";
-      } else {
-        const fallbackReport = buildOnDeviceStructuredAuditReport({ domain, profile });
-        anonymizedAnswer = `${fallbackReport.executiveSummary} Top recommended action: ${fallbackReport.findings[0]?.suggestedRedline ?? "Review high-risk clauses before signing."}`;
-      }
-      onChunk?.(rehydrateText(anonymizedAnswer, entities));
-      inferenceSource = "ON_DEVICE";
-      modelUsed = "On-Device Advisory Engine (Cloud Quota Failover)";
-      noteSuffix = " Cloud quota reached; answered locally on-device.";
+      throw new Error(
+        "Local Shield complete (0B leaked) — reconnect for Deep Cloud Q&A, or enable Chrome Gemini Nano 4 for offline Q&A.",
+      );
     }
   }
 

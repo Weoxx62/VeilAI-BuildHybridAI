@@ -10,7 +10,11 @@ import {
 } from "./localVault.js";
 import { DEMO_SCENARIOS } from "./scenarios.js";
 import { computeLocalSharePercent, createInitialTelemetry } from "./telemetry.js";
-import { buildZeroLeakCertificate, runLocalStructuralHeuristics } from "./hybridRouter.js";
+import {
+  buildDynamicAuditReportFromNanoTriage,
+  buildZeroLeakCertificate,
+  runLocalStructuralHeuristics,
+} from "./hybridRouter.js";
 import type { AuditReport } from "./types.js";
 
 const SYNTHETIC_STRIPE_KEY = ["sk", "live", "51NxVeilDemo92KlmPqRsTuVwXyZ01928374"].join("_");
@@ -194,5 +198,36 @@ describe("VeilAI Local Privacy Vault — Zero-Leak Invariants", () => {
       expect(vault.entities.length).toBeGreaterThanOrEqual(7);
       expect(vault.bytesShielded).toBeGreaterThan(50);
     }
+  });
+
+  it("builds structured AuditReport dynamically from Gemini Nano 4 triage output with zero hardcoded demo findings", () => {
+    const report = buildDynamicAuditReportFromNanoTriage({
+      triage: {
+        documentType: "Commercial Warehouse Lease",
+        urgency: "HIGH",
+        quickSummary:
+          "[COMPANY_1] faces uncapped repair liability and a 10-year auto-renewal trap.",
+        topFlags: [
+          "Clause 7 :: Uncapped Indemnity :: [COMPANY_1] assumes unlimited facility liability :: Cap liability at 12 months of [SALARY_1]",
+          "Clause 12 :: Auto-Renewal Window :: Requires 180 days prior notice :: Reduce notice window to 60 days",
+        ],
+      },
+      profileLabel: "GDPR EU Legal & HR",
+      shieldedCount: 4,
+    });
+
+    expect(report.riskLevel).toBe("HIGH");
+    expect(report.riskScore).toBe(82);
+    expect(report.findings).toHaveLength(2);
+    expect(report.findings[0].clauseRef).toBe("Clause 7");
+    expect(report.findings[0].title).toBe("Uncapped Indemnity");
+    expect(report.findings[0].suggestedRedline).toContain("[SALARY_1]");
+    expect(report.complianceChecks[0].note).toContain("4 sensitive entities");
+
+    const serialized = JSON.stringify(report);
+    expect(serialized).not.toContain("138 mg/dL");
+    expect(serialized).not.toContain("198 days");
+    expect(serialized).not.toContain("Delaware");
+    expect(serialized).not.toContain("Cour de Cassation");
   });
 });

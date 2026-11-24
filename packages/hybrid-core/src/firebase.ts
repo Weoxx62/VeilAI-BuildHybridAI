@@ -1,5 +1,6 @@
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import {
+  CustomProvider,
   initializeAppCheck,
   ReCaptchaV3Provider,
   type AppCheck,
@@ -103,27 +104,37 @@ export function initVeilFirebase(
         debugVal === "true" ? true : debugVal;
     }
 
+    const isExtensionPage =
+      typeof window !== "undefined" &&
+      window.location?.protocol === "chrome-extension:";
+
     const siteKey = config.recaptchaSiteKey?.trim();
-    if (siteKey) {
+    if (enableDebug) {
+      // CustomProvider avoids injecting external reCAPTCHA scripts inside MV3 extension panels
+      // and local debug sessions while Firebase App Check exchanges FIREBASE_APPCHECK_DEBUG_TOKEN.
+      try {
+        appCheck = initializeAppCheck(app, {
+          provider: new CustomProvider({
+            getToken: async () => ({
+              token: "",
+              expireTimeMillis: Date.now() + 3_600_000,
+            }),
+          }),
+          isTokenAutoRefreshEnabled: true,
+        });
+        appCheckMode = "debug-token";
+      } catch {
+        appCheckMode = "debug-token";
+      }
+    } else if (siteKey && !isExtensionPage) {
       try {
         appCheck = initializeAppCheck(app, {
           provider: new ReCaptchaV3Provider(siteKey),
           isTokenAutoRefreshEnabled: true,
         });
-        appCheckMode = enableDebug ? "debug-token" : "recaptcha-v3";
+        appCheckMode = "recaptcha-v3";
       } catch {
-        appCheckMode = enableDebug ? "debug-token" : "not-configured";
-      }
-    } else if (enableDebug) {
-      // Debug provider still requires initializeAppCheck with a provider wrapper in Web SDK
-      try {
-        appCheck = initializeAppCheck(app, {
-          provider: new ReCaptchaV3Provider("6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI"),
-          isTokenAutoRefreshEnabled: true,
-        });
-        appCheckMode = "debug-token";
-      } catch {
-        appCheckMode = "debug-token";
+        appCheckMode = "not-configured";
       }
     }
   }

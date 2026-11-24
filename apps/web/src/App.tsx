@@ -92,6 +92,9 @@ function defaultCustomCategoryForDomain(domain: DocumentDomain): EntityCategory 
 
 function humanizeError(err: unknown, fallback: string): string {
   const raw = err instanceof Error ? err.message : fallback;
+  if (raw.includes("Local Shield complete")) {
+    return raw;
+  }
   if (/auth\/(operation-not-allowed|configuration-not-found)/i.test(raw)) {
     return "Google Sign-In is not enabled in Firebase Console yet. Switched you to a private Guest workspace automatically.";
   }

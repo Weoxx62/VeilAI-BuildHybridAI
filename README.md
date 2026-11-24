@@ -8,11 +8,21 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-3B82F6?style=flat-square)](./LICENSE)
 [![Hackathon](https://img.shields.io/badge/Google-%23BuildHybridAI_2026-F97316?style=flat-square)](https://firebasehybridaihackathon.devpost.com/)
 [![Firebase AI Logic](https://img.shields.io/badge/Firebase_AI_Logic-v13.4.0_Hybrid_SDK-FFCA28?style=flat-square&logo=firebase&logoColor=black)](https://firebase.google.com/docs/ai-logic)
-[![Tests](https://img.shields.io/badge/Vitest-7%2F7_Passing-34D399?style=flat-square)](./packages/hybrid-core/src/localVault.test.ts)
+[![Tests](https://img.shields.io/badge/Vitest-8%2F8_Passing-34D399?style=flat-square)](./packages/hybrid-core/src/localVault.test.ts)
 
 > **Review confidential contracts, medical lab reports, payslips, and source code with Frontier Cloud AI — without a single byte of personal or secret data ever leaving your device.**
 >
 > 🌐 **Try it live (0 setup, auto Guest Workspace)**: **[https://veilai-hybrid-2026.web.app](https://veilai-hybrid-2026.web.app)**
+
+---
+
+## 📸 Product Tour
+
+| Executive Contract Review & Clause Jump | Zero-Leak Wire Proof & SDK Inspector |
+| :---: | :---: |
+| <img src="./docs/screenshots/01-workspace-review.png" alt="VeilAI Workspace — NDA review with local highlights, Section 3 jump, and accepted redline" width="100%" /> | <img src="./docs/screenshots/02-zero-leak-inspector.png" alt="VeilAI Privacy Inspector — Anonymized view with 0 B PII leaked and aborted leak simulation" width="100%" /> |
+| **Multimodal HIPAA Vision & Offline Mode** | **DevSecOps Credential Shield & Code Review** |
+| <img src="./docs/screenshots/03-medical-vision-offline.png" alt="VeilAI HIPAA Vision — Clinical lab image with local privacy mask in Working Offline mode" width="100%" /> | <img src="./docs/screenshots/04-code-secrets-qa.png" alt="VeilAI DevSecOps — Stripe, AWS, PostgreSQL, and JWT secrets shielded locally before 98/100 cloud audit" width="100%" /> |
 
 ---
 
@@ -180,7 +190,7 @@ npm install
 cp apps/web/.env.example apps/web/.env.local
 cp apps/extension/.env.example apps/extension/.env.local
 
-# Run the 7 Vitest Zero-Leak unit tests & TypeScript check
+# Run the 8 Vitest Zero-Leak unit tests & TypeScript check
 npm test
 npm run typecheck
 
